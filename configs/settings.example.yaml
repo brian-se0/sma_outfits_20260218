@@ -1,0 +1,71 @@
+alpaca:
+  base_url: https://paper-api.alpaca.markets
+  data_url: https://data.alpaca.markets
+  data_feed: iex
+
+universe:
+  symbols:
+    - SPY
+    - QQQ
+    - DIA
+    - UPRO
+    - TQQQ
+    - SQQQ
+    - UDOW
+    - SDOW
+    - SOXL
+    - SOXS
+    - SVIX
+    - VIXY
+    - XLF
+    - JPM
+    - NVDA
+    - TSLA
+    - AMD
+    - GME
+    - SMH
+    - FAS
+    - FAZ
+    - BTC/USD
+    - ETH/USD
+  proxy_map:
+    SPX: SPY
+    IXIC: QQQ
+    NDX: QQQ
+    DJI: DIA
+    VIX: VIXY
+
+sessions:
+  regular_only: true
+  extended_enabled: false
+  timezone: America/New_York
+
+timeframes:
+  live: [1m, 2m, 3m, 5m, 10m, 15m, 20m, 30m, 1h, 2h, 4h, 1D]
+  derived: [1W, 1M, 1Q]
+
+signal:
+  tolerance: 0.01
+  trigger_mode: bar_touch
+  volatility_percentile_threshold: 75.0
+
+risk:
+  long_break: 0.01
+  short_break: 0.01
+  partial_take_r: 1.0
+  final_take_r: 3.0
+  timeout_bars: 120
+  migrations:
+    AMDL:
+      proxy_symbol: SMH
+      break_level: 374.24
+      mode: below
+      offset: 0.01
+
+archive:
+  enabled: true
+  root: artifacts
+
+storage_root: artifacts/storage
+events_root: artifacts/events
+outfits_path: src/sma_outfits/config/outfits.yaml
