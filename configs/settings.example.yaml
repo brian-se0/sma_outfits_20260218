@@ -66,6 +66,16 @@ archive:
   enabled: true
   root: artifacts
 
+live:
+  runtime_minutes: null
+  warmup_minutes: 480
+  reconnect_max_attempts: 8
+  reconnect_base_delay_seconds: 1.0
+  reconnect_max_delay_seconds: 30.0
+  stale_feed_seconds: 120
+  heartbeat_interval_seconds: 20
+  heartbeat_timeout_seconds: 10
+
 storage_root: artifacts/storage
 events_root: artifacts/events
 outfits_path: src/sma_outfits/config/outfits.yaml

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
-from datetime import timedelta
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import typer
@@ -12,8 +11,9 @@ from sma_outfits.config.models import Settings, load_settings
 from sma_outfits.data.alpaca_clients import AlpacaRESTClient
 from sma_outfits.data.ingest import BackfillResult, backfill_historical
 from sma_outfits.data.storage import StorageManager
+from sma_outfits.live import LiveRunner
 from sma_outfits.monitoring.logging import configure_logging
-from sma_outfits.reporting.summary import write_summary_report
+from sma_outfits.reporting.summary import build_summary_from_records, write_summary_report
 from sma_outfits.replay.engine import ReplayEngine
 from sma_outfits.runtime import assert_python_runtime
 from sma_outfits.utils import dedupe_keep_order, ensure_utc_timestamp, parse_csv
@@ -89,32 +89,49 @@ def backfill(
 @app.command("run-live")
 def run_live(
     config: Path = typer.Option(Path("configs/settings.example.yaml"), "--config"),
-    lookback_hours: int = typer.Option(8, "--lookback-hours"),
+    lookback_hours: int | None = typer.Option(
+        None,
+        "--lookback-hours",
+        help="Optional warmup override (hours) used to seed SMA state before streaming",
+    ),
+    runtime_minutes: int | None = typer.Option(
+        None,
+        "--runtime-minutes",
+        help="Optional run length. When omitted, uses config live.runtime_minutes.",
+    ),
 ) -> None:
     assert_python_runtime()
     settings = _load_runtime_settings(config)
     configure_logging()
-    end_ts = pd.Timestamp.utcnow().tz_convert("UTC")
-    start_ts = end_ts - timedelta(hours=lookback_hours)
-    client = AlpacaRESTClient(settings.alpaca)
     storage = StorageManager(Path(settings.storage_root))
-    backfill_historical(
-        settings=settings,
-        symbols=settings.universe.symbols,
-        timeframes=settings.timeframes.live,
-        start=start_ts,
-        end=end_ts,
-        client=client,
-        storage=storage,
+    runner = LiveRunner(settings=settings, storage=storage)
+    warmup_minutes = lookback_hours * 60 if lookback_hours is not None else None
+    try:
+        result = asyncio.run(
+            runner.run(
+                symbols=settings.universe.symbols,
+                timeframes=settings.timeframes.live,
+                runtime_minutes=runtime_minutes,
+                warmup_minutes=warmup_minutes,
+            )
+        )
+    except KeyboardInterrupt:
+        raise typer.Exit(code=130) from None
+
+    payload = dict(result.summary)
+    payload.update(
+        {
+            "bars_received": result.bars_received,
+            "bars_processed": result.bars_processed,
+            "duplicate_bars_skipped": result.duplicate_bars_skipped,
+            "reconnects": result.reconnects,
+            "stale_feed_reconnects": result.stale_feed_reconnects,
+            "heartbeat_failures": result.heartbeat_failures,
+            "started_at": result.started_at.isoformat(),
+            "ended_at": result.ended_at.isoformat(),
+        }
     )
-    replay_engine = ReplayEngine(settings=settings, storage=storage)
-    result = replay_engine.run(
-        start=start_ts,
-        end=end_ts,
-        symbols=settings.universe.symbols,
-        timeframes=settings.timeframes.live,
-    )
-    typer.echo(json.dumps(result.summary, indent=2))
+    typer.echo(json.dumps(payload, indent=2))
 
 
 @app.command("replay")
@@ -168,7 +185,13 @@ def report(
         raise RuntimeError("No stored replay events found. Run `make replay` first.")
 
     start_ts, end_ts = _resolve_report_range(date, range_)
-    summary = _build_summary_from_records(strikes, signals, positions, start_ts, end_ts)
+    summary = build_summary_from_records(
+        strike_rows=strikes,
+        signal_rows=signals,
+        position_rows=positions,
+        start=start_ts,
+        end=end_ts,
+    )
     label = (
         f"{start_ts.strftime('%Y%m%d')}_{end_ts.strftime('%Y%m%d')}"
         if start_ts and end_ts
@@ -209,62 +232,6 @@ def _resolve_report_range(
         start_raw, end_raw = range_.split(":", 1)
         return ensure_utc_timestamp(start_raw), ensure_utc_timestamp(end_raw)
     return None, None
-
-
-def _build_summary_from_records(
-    strike_rows: list[dict[str, Any]],
-    signal_rows: list[dict[str, Any]],
-    position_rows: list[dict[str, Any]],
-    start: pd.Timestamp | None,
-    end: pd.Timestamp | None,
-) -> dict[str, Any]:
-    strikes = _filter_rows(strike_rows, "bar_ts", start, end)
-    positions = _filter_rows(position_rows, "ts", start, end)
-
-    closed = [row for row in positions if row.get("action") == "close"]
-    wins = [
-        row
-        for row in closed
-        if row.get("reason") in {"+3R_final_take", "risk_migration_cut"}
-    ]
-    symbol_counts: dict[str, int] = {}
-    outfit_counts: dict[str, int] = {}
-    for row in strikes:
-        symbol = str(row.get("symbol"))
-        outfit = str(row.get("outfit_id"))
-        symbol_counts[symbol] = symbol_counts.get(symbol, 0) + 1
-        outfit_counts[outfit] = outfit_counts.get(outfit, 0) + 1
-
-    top_symbols = sorted(symbol_counts.items(), key=lambda item: item[1], reverse=True)[:5]
-    top_outfits = sorted(outfit_counts.items(), key=lambda item: item[1], reverse=True)[:5]
-    return {
-        "total_strikes": len(strikes),
-        "total_signals": len(signal_rows),
-        "total_position_events": len(positions),
-        "closed_positions": len(closed),
-        "win_rate": (len(wins) / len(closed)) if closed else 0.0,
-        "top_symbols": top_symbols,
-        "top_outfits": top_outfits,
-    }
-
-
-def _filter_rows(
-    rows: list[dict[str, Any]],
-    timestamp_key: str,
-    start: pd.Timestamp | None,
-    end: pd.Timestamp | None,
-) -> list[dict[str, Any]]:
-    if start is None or end is None:
-        return rows
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        raw = row.get(timestamp_key)
-        if not raw:
-            continue
-        ts = ensure_utc_timestamp(str(raw))
-        if start <= ts <= end:
-            out.append(row)
-    return out
 
 
 if __name__ == "__main__":

@@ -185,6 +185,57 @@ class ArchiveConfig(BaseModel):
     root: str = "artifacts"
 
 
+class LiveConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    runtime_minutes: int | None = None
+    warmup_minutes: int = 480
+    reconnect_max_attempts: int = 8
+    reconnect_base_delay_seconds: float = 1.0
+    reconnect_max_delay_seconds: float = 30.0
+    stale_feed_seconds: int = 120
+    heartbeat_interval_seconds: int = 20
+    heartbeat_timeout_seconds: int = 10
+
+    @field_validator("runtime_minutes")
+    @classmethod
+    def _validate_runtime_minutes(cls, value: int | None) -> int | None:
+        if value is None:
+            return value
+        if value <= 0:
+            raise ValueError("live.runtime_minutes must be > 0 when set")
+        return value
+
+    @field_validator("warmup_minutes", "reconnect_max_attempts", "stale_feed_seconds")
+    @classmethod
+    def _positive_integers(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("live config values must be > 0")
+        return value
+
+    @field_validator(
+        "reconnect_base_delay_seconds",
+        "reconnect_max_delay_seconds",
+        "heartbeat_interval_seconds",
+        "heartbeat_timeout_seconds",
+    )
+    @classmethod
+    def _positive_floats(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("live config values must be > 0")
+        return value
+
+    @field_validator("reconnect_max_delay_seconds")
+    @classmethod
+    def _validate_reconnect_bounds(cls, value: float, info) -> float:  # type: ignore[override]
+        base = info.data.get("reconnect_base_delay_seconds")
+        if isinstance(base, (int, float)) and value < float(base):
+            raise ValueError(
+                "live.reconnect_max_delay_seconds must be >= live.reconnect_base_delay_seconds"
+            )
+        return value
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -195,6 +246,7 @@ class Settings(BaseModel):
     signal: SignalConfig = Field(default_factory=SignalConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     archive: ArchiveConfig = Field(default_factory=ArchiveConfig)
+    live: LiveConfig = Field(default_factory=LiveConfig)
     storage_root: str = "artifacts/storage"
     events_root: str = "artifacts/events"
     outfits_path: str = "src/sma_outfits/config/outfits.yaml"

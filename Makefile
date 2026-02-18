@@ -7,7 +7,7 @@ END ?= 2025-01-02T16:00:00Z
 SYMBOLS ?= SPY,QQQ
 TIMEFRAMES ?= 1m,5m,15m,1h,1D
 
-.PHONY: venv install check-python validate-config test backfill replay run-live report clean clean-all
+.PHONY: venv install check-python validate-config test backfill replay run-live report e2e clean clean-all
 
 venv:
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; if (!(Test-Path '$(PYTHON)')) { py -3.14 -m venv $(VENV) }; if (!(Test-Path '$(VENV)\\Scripts\\pip.exe')) { & '$(PYTHON)' -m ensurepip --upgrade --default-pip }"
@@ -35,6 +35,13 @@ run-live: install
 
 report: install
 	$(PYTHON) -m sma_outfits.cli report --config $(CONFIG)
+
+e2e:
+	$(MAKE) validate-config CONFIG=$(CONFIG)
+	$(MAKE) test
+	$(MAKE) backfill CONFIG=$(CONFIG) SYMBOLS=$(SYMBOLS) START=$(START) END=$(END) TIMEFRAMES=$(TIMEFRAMES)
+	$(MAKE) replay CONFIG=$(CONFIG) START=$(START) END=$(END)
+	$(MAKE) report CONFIG=$(CONFIG)
 
 clean:
 	powershell -NoProfile -Command "$$targets = @('artifacts', '.tmp', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'htmlcov', 'build', 'dist'); foreach ($$t in $$targets) { if (Test-Path $$t) { Remove-Item -Recurse -Force $$t } }; Get-ChildItem -Path . -Recurse -Directory -Filter '__pycache__' | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem -Path . -Recurse -File -Include '*.pyc','*.pyo','*.pyd' | Remove-Item -Force -ErrorAction SilentlyContinue; Get-ChildItem -Path . -Directory -Filter '*.egg-info' | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue"
