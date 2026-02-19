@@ -359,7 +359,7 @@ def report(
     range_: str | None = typer.Option(
         None,
         "--range",
-        help="UTC range format start:end",
+        help="UTC range format start:end (date-only) or start,end (full timestamps)",
     ),
 ) -> None:
     assert_python_runtime()
@@ -368,8 +368,6 @@ def report(
     strikes = storage.load_events("strikes")
     signals = storage.load_events("signals")
     positions = storage.load_events("positions")
-    if not strikes and not signals and not positions:
-        raise RuntimeError("No stored replay events found. Run `make replay` first.")
 
     start_ts, end_ts = _resolve_report_range(date, range_)
     summary = build_summary_from_records(
@@ -414,10 +412,22 @@ def _resolve_report_range(
         end = ensure_utc_timestamp(f"{date}T23:59:59Z")
         return start, end
     if range_:
-        if ":" not in range_:
-            raise ValueError("--range format must be start:end")
-        start_raw, end_raw = range_.split(":", 1)
-        return ensure_utc_timestamp(start_raw), ensure_utc_timestamp(end_raw)
+        range_value = range_.strip()
+        if "," in range_value:
+            start_raw, end_raw = range_value.split(",", 1)
+        elif range_value.count(":") == 1:
+            start_raw, end_raw = range_value.split(":", 1)
+        else:
+            raise ValueError(
+                "--range format must be start:end (date-only) or start,end (timestamps)"
+            )
+        start_clean = start_raw.strip()
+        end_clean = end_raw.strip()
+        if not start_clean or not end_clean:
+            raise ValueError(
+                "--range format must include non-empty start and end values"
+            )
+        return ensure_utc_timestamp(start_clean), ensure_utc_timestamp(end_clean)
     return None, None
 
 

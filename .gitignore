@@ -45,6 +45,9 @@ artifacts/
 *.sqlite
 *.sqlite3
 *.jsonl
+runs_grok/
+runs_grok.zip
+runs_grok.tar.gz
 
 # Generated media exports
 *.png

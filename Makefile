@@ -11,6 +11,8 @@ CONFIG ?= configs/settings.example.yaml
 #   make e2e PROFILE=week SYMBOLS=SPY
 #   make e2e PROFILE=max UNIVERSE=all TIMEFRAME_SET=all
 #   make e2e START=2025-01-02T14:30:00Z END=2025-01-31T21:00:00Z
+#   make e2e PROFILE=month E2E_WARMUP_DAYS=150
+#   make e2e PROFILE=month E2E_REPORT_RANGE=2025-01-02T14:30:00Z,2025-01-31T21:00:00Z
 PROFILE ?= smoke
 UNIVERSE ?= core
 TIMEFRAME_SET ?= core
@@ -61,10 +63,24 @@ END ?= $(PROFILE_END)
 SYMBOLS ?= $(PROFILE_SYMBOLS)
 TIMEFRAMES ?= $(PROFILE_TIMEFRAMES)
 
+# e2e warmup + reporting window controls:
+# - Analysis window is what report summarizes.
+# - Backfill/replay windows can include additional warmup bars.
+E2E_ANALYSIS_START ?= $(START)
+E2E_ANALYSIS_END ?= $(END)
+E2E_WARMUP_DAYS ?= 120
+E2E_WARMUP_START ?= $(shell powershell -NoProfile -Command '$$start=[DateTimeOffset]::Parse("$(E2E_ANALYSIS_START)"); $$days=[double]"$(E2E_WARMUP_DAYS)"; [Console]::Out.Write($$start.AddDays(-1.0 * $$days).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))')
+E2E_BACKFILL_START ?= $(E2E_WARMUP_START)
+E2E_BACKFILL_END ?= $(E2E_ANALYSIS_END)
+E2E_REPLAY_START ?= $(E2E_WARMUP_START)
+E2E_REPLAY_END ?= $(E2E_ANALYSIS_END)
+E2E_REPORT_RANGE ?= $(E2E_ANALYSIS_START),$(E2E_ANALYSIS_END)
+
 BACKFILL_SYMBOLS_ARG := $(if $(strip $(SYMBOLS)),--symbols $(SYMBOLS),)
 BACKFILL_TIMEFRAMES_ARG := $(if $(strip $(TIMEFRAMES)),--timeframes $(TIMEFRAMES),)
 REPLAY_SYMBOLS_ARG := $(if $(strip $(SYMBOLS)),--symbols $(SYMBOLS),)
 REPLAY_TIMEFRAMES_ARG := $(if $(strip $(TIMEFRAMES)),--timeframes $(TIMEFRAMES),)
+E2E_REPORT_RANGE_ARG := $(if $(strip $(E2E_REPORT_RANGE)),--range $(E2E_REPORT_RANGE),)
 
 .PHONY: venv install check-python validate-config test backfill replay run-live report preflight-storage e2e e2e-smoke e2e-week e2e-max clean clean-all
 
@@ -103,16 +119,17 @@ preflight-storage:
 
 e2e: preflight-storage
 	$(MAKE) install
+	powershell -NoProfile -Command "Write-Output ('e2e window: analysis_start=$(E2E_ANALYSIS_START) analysis_end=$(E2E_ANALYSIS_END) warmup_days=$(E2E_WARMUP_DAYS) warmup_start=$(E2E_WARMUP_START) replay_start=$(E2E_REPLAY_START) replay_end=$(E2E_REPLAY_END) report_range=$(E2E_REPORT_RANGE)')"
 	powershell -NoProfile -Command "Write-Progress -Activity 'make e2e' -Status 'validate-config (1/5)' -PercentComplete 5"
 	$(PYTHON) -m sma_outfits.cli validate-config --config $(CONFIG)
 	powershell -NoProfile -Command "Write-Progress -Activity 'make e2e' -Status 'test (2/5)' -PercentComplete 25"
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp\\pytest' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; & '$(PYTHON)' -m pytest"
 	powershell -NoProfile -Command "Write-Progress -Activity 'make e2e' -Status 'backfill (3/5)' -PercentComplete 50"
-	$(PYTHON) -m sma_outfits.cli backfill --config $(CONFIG) $(BACKFILL_SYMBOLS_ARG) --start $(START) --end $(END) $(BACKFILL_TIMEFRAMES_ARG)
+	$(PYTHON) -m sma_outfits.cli backfill --config $(CONFIG) $(BACKFILL_SYMBOLS_ARG) --start $(E2E_BACKFILL_START) --end $(E2E_BACKFILL_END) $(BACKFILL_TIMEFRAMES_ARG)
 	powershell -NoProfile -Command "Write-Progress -Activity 'make e2e' -Status 'replay (4/5)' -PercentComplete 75"
-	$(PYTHON) -m sma_outfits.cli replay --config $(CONFIG) --start $(START) --end $(END) $(REPLAY_SYMBOLS_ARG) $(REPLAY_TIMEFRAMES_ARG)
+	$(PYTHON) -m sma_outfits.cli replay --config $(CONFIG) --start $(E2E_REPLAY_START) --end $(E2E_REPLAY_END) $(REPLAY_SYMBOLS_ARG) $(REPLAY_TIMEFRAMES_ARG)
 	powershell -NoProfile -Command "Write-Progress -Activity 'make e2e' -Status 'report (5/5)' -PercentComplete 90"
-	$(PYTHON) -m sma_outfits.cli report --config $(CONFIG)
+	$(PYTHON) -m sma_outfits.cli report --config $(CONFIG) $(E2E_REPORT_RANGE_ARG)
 	powershell -NoProfile -Command "Write-Progress -Activity 'make e2e' -Completed"
 
 e2e-smoke:
