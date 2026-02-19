@@ -167,3 +167,47 @@ def test_invalid_asof_date_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="alpaca.asof must be valid YYYY-MM-DD"):
         load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_alpaca_base_url_with_path_rejected(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets/v2",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="alpaca.base_url must be host-only"):
+        load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_alpaca_data_url_with_path_rejected(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets/v2",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="alpaca.data_url must be host-only"):
+        load_settings(config_path=config_path, env_path=env_path)

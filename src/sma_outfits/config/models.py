@@ -4,9 +4,17 @@ from datetime import date
 from pathlib import Path
 import re
 from typing import Literal
+from urllib.parse import urlparse
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from sma_outfits.utils import SUPPORTED_TIMEFRAMES
 
@@ -124,6 +132,26 @@ class AlpacaConfig(BaseModel):
         if not candidate:
             raise ValueError("value must be non-empty")
         return candidate
+
+    @field_validator("base_url", "data_url")
+    @classmethod
+    def _validate_host_only_url(cls, value: str, info: ValidationInfo) -> str:
+        candidate = value.strip()
+        parsed = urlparse(candidate)
+        field_name = info.field_name or "url"
+        field_path = f"alpaca.{field_name}"
+
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(f"{field_path} must be an absolute http(s) URL")
+        if parsed.params or parsed.query or parsed.fragment:
+            raise ValueError(f"{field_path} must not include params, query, or fragment")
+        if parsed.path not in {"", "/"}:
+            raise ValueError(
+                f"{field_path} must be host-only (no path). "
+                "Use values like https://paper-api.alpaca.markets and "
+                "https://data.alpaca.markets"
+            )
+        return f"{parsed.scheme}://{parsed.netloc}"
 
     @field_validator("asof")
     @classmethod

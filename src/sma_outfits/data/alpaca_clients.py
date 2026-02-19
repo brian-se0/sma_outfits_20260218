@@ -82,6 +82,8 @@ class AlpacaRESTClient:
 
     def __post_init__(self) -> None:
         self._session = requests.Session()
+        # Keep networking deterministic and config-driven; do not inherit proxy env vars.
+        self._session.trust_env = False
         self._session.headers.update(
             {
                 "APCA-API-KEY-ID": self.config.api_key,
@@ -285,6 +287,7 @@ class AlpacaWebSocketBarStream:
         try:
             async with websockets.connect(
                 uri,
+                proxy=None,
                 ping_interval=None,
                 ping_timeout=None,
                 close_timeout=5,

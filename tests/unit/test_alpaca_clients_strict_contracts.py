@@ -17,11 +17,11 @@ from sma_outfits.data.alpaca_clients import (
 
 @dataclass
 class _FakeResponse:
-    payload: dict[str, Any]
+    payload: Any
     status_code: int = 200
     text: str = ""
 
-    def json(self) -> dict[str, Any]:
+    def json(self) -> Any:
         return self.payload
 
 
@@ -82,6 +82,11 @@ def test_rejects_non_canonical_rest_bars_shape() -> None:
             timeframe="1m",
             market="stocks",
         )
+
+
+def test_rest_client_does_not_trust_environment_proxy_settings() -> None:
+    client = AlpacaRESTClient(_config())
+    assert client._session.trust_env is False
 
 
 def test_empty_rest_bars_map_treated_as_no_data() -> None:
@@ -245,6 +250,30 @@ def test_crypto_bar_request_uses_configured_crypto_loc() -> None:
     args, _kwargs = fake_session.call_args[0]
     assert args
     assert str(args[0]).endswith("/v1beta3/crypto/global/bars")
+
+
+def test_calendar_request_uses_single_v2_prefix() -> None:
+    client = AlpacaRESTClient(_config())
+    fake_session = _FakeSession(
+        responses=[
+            _FakeResponse(
+                payload=[{"date": "2025-01-02", "open": "09:30", "close": "16:00"}]
+            )
+        ]
+    )
+    client._session = fake_session
+
+    sessions = client.fetch_calendar_sessions(
+        start=pd.Timestamp("2025-01-02T14:30:00Z"),
+        end=pd.Timestamp("2025-01-02T20:00:00Z"),
+    )
+
+    assert "2025-01-02" in sessions
+    assert sessions["2025-01-02"] is not None
+    assert fake_session.call_args
+    args, _kwargs = fake_session.call_args[0]
+    assert args
+    assert str(args[0]) == "https://paper-api.alpaca.markets/v2/calendar"
 
 
 def test_rejects_single_object_websocket_payload() -> None:
