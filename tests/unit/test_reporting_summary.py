@@ -43,6 +43,7 @@ def test_build_summary_includes_r_outcomes_and_breakdowns() -> None:
         SignalEvent(
             id="signal-1",
             strike_id="strike-1",
+            route_id="route-1",
             side="LONG",
             signal_type="precision_buy",
             entry=100.0,
@@ -53,8 +54,9 @@ def test_build_summary_includes_r_outcomes_and_breakdowns() -> None:
         SignalEvent(
             id="signal-2",
             strike_id="strike-2",
+            route_id="route-2",
             side="SHORT",
-            signal_type="automated_short",
+            signal_type="magnetized_buy",
             entry=200.0,
             stop=201.0,
             confidence="HIGH",
@@ -100,6 +102,8 @@ def test_build_summary_includes_r_outcomes_and_breakdowns() -> None:
     assert summary["r_outcome"]["bucket_counts"]["<=-1R"] == 1
     assert summary["hit_rate_by_side"]
     assert summary["period_summary_daily"]
+    signal_labels = {row["label"] for row in summary["hit_rate_by_signal_type"]}
+    assert "magnetized_buy" in signal_labels
 
 
 def test_build_summary_from_records_applies_time_range() -> None:
@@ -117,6 +121,7 @@ def test_build_summary_from_records_applies_time_range() -> None:
     signal = SignalEvent(
         id="signal-1",
         strike_id="strike-1",
+        route_id="route-1",
         side="LONG",
         signal_type="precision_buy",
         entry=100.0,
@@ -162,6 +167,7 @@ def test_build_summary_fails_when_signal_references_missing_strike() -> None:
     signal = SignalEvent(
         id="signal-missing",
         strike_id="strike-missing",
+        route_id="route-missing",
         side="LONG",
         signal_type="precision_buy",
         entry=100.0,

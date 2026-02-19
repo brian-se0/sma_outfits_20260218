@@ -8,11 +8,25 @@ alpaca:
 
 universe:
   symbols:
+    - AAPL
+    - AMDL
+    - CONL
+    - DUST
+    - ETHU
+    - IYR
+    - MUU
+    - NVD
+    - NVDX
+    - SPXU
     - SPY
     - QQQ
     - DIA
+    - TNA
     - UPRO
     - TQQQ
+    - TSLL
+    - TSLT
+    - TZA
     - SQQQ
     - UDOW
     - SDOW
@@ -26,23 +40,41 @@ universe:
     - TSLA
     - AMD
     - GME
+    - RWM
     - SMH
     - FAS
     - FAZ
     - BTC/USD
     - ETH/USD
   proxy_map:
+    AMLD: AMDL
+    IVR: IYR
+    SOX: SMH
     SPX: SPY
     IXIC: QQQ
     NDX: QQQ
     DJI: DIA
     VIX: VIXY
   symbol_markets:
+    AAPL: stocks
+    AMDL: stocks
+    CONL: stocks
+    DUST: stocks
+    ETHU: stocks
+    IYR: stocks
+    MUU: stocks
+    NVD: stocks
+    NVDX: stocks
+    SPXU: stocks
     SPY: stocks
     QQQ: stocks
     DIA: stocks
+    TNA: stocks
     UPRO: stocks
     TQQQ: stocks
+    TSLL: stocks
+    TSLT: stocks
+    TZA: stocks
     SQQQ: stocks
     UDOW: stocks
     SDOW: stocks
@@ -56,6 +88,7 @@ universe:
     TSLA: stocks
     AMD: stocks
     GME: stocks
+    RWM: stocks
     SMH: stocks
     FAS: stocks
     FAZ: stocks
@@ -79,6 +112,39 @@ signal:
   tolerance: 0.01
   trigger_mode: bar_touch
   volatility_percentile_threshold: 75.0
+
+strategy:
+  mode: author_v1
+  price_basis: ohlc4
+  trigger_mode: close_touch_or_cross
+  strict_routing: true
+  allow_same_bar_exit: false
+  ambiguity_policy: fail
+  routes:
+    - id: qqq_1h_author
+      symbol: QQQ
+      timeframe: 1h
+      outfit_id: base2_nvda
+      key_period: 512
+      side: LONG
+      signal_type: optimized_buy
+      micro_periods: [16, 32, 64, 128, 256]
+      ignore_close_below_key_when_micro_positive: true
+      macro_gate: nas
+      risk_mode: singular_penny_only
+      stop_offset: 0.01
+    - id: rwm_30m_author
+      symbol: RWM
+      timeframe: 30m
+      outfit_id: svix_211
+      key_period: 844
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [26, 52, 116, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: singular_penny_only
+      stop_offset: 0.01
 
 risk:
   long_break: 0.01

@@ -25,6 +25,7 @@ def _signal() -> SignalEvent:
     return SignalEvent(
         id="signal-1",
         strike_id="strike-1",
+        route_id="route-1",
         side="LONG",
         signal_type="precision_buy",
         entry=100.1,

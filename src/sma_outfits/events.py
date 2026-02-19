@@ -8,6 +8,7 @@ Side = Literal["LONG", "SHORT"]
 SignalType = Literal[
     "precision_buy",
     "optimized_buy",
+    "magnetized_buy",
     "automated_short",
     "singular_point_hard_stop",
 ]
@@ -53,6 +54,7 @@ class StrikeEvent:
 class SignalEvent:
     id: str
     strike_id: str
+    route_id: str
     side: Side
     signal_type: SignalType
     entry: float

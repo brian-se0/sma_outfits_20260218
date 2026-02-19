@@ -357,6 +357,7 @@ def _record_to_signal(row: dict[str, Any]) -> SignalEvent:
     return SignalEvent(
         id=str(row["id"]),
         strike_id=str(row["strike_id"]),
+        route_id=str(row["route_id"]),
         side=str(row["side"]),  # type: ignore[arg-type]
         signal_type=str(row["signal_type"]),  # type: ignore[arg-type]
         entry=float(row["entry"]),

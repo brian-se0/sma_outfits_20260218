@@ -11,7 +11,7 @@ from typing import Any, AsyncIterator, Callable
 import pandas as pd
 
 from sma_outfits.archive.thread_writer import append_thread_markdown
-from sma_outfits.config.models import Settings
+from sma_outfits.config.models import RouteRule, Settings
 from sma_outfits.data.alpaca_clients import (
     AlpacaRESTClient,
     AlpacaWebSocketBarStream,
@@ -34,7 +34,6 @@ from sma_outfits.events import (
 from sma_outfits.indicators.sma_engine import SMAEngine
 from sma_outfits.reporting.summary import build_summary
 from sma_outfits.risk.manager import ManagedPosition, RiskManager
-from sma_outfits.signals.classifier import SignalClassifier
 from sma_outfits.signals.detector import StrikeDetector, load_outfits
 from sma_outfits.utils import (
     apply_regular_session_filter,
@@ -76,6 +75,9 @@ class LiveRunner:
 
         outfits_path = self._resolve_outfits_path(settings.outfits_path)
         self._outfits = load_outfits(outfits_path)
+        self._routes_by_id: dict[str, RouteRule] = {
+            route.id: route for route in self.settings.strategy.routes
+        }
         self._init_pipeline_components()
 
         self._lock = asyncio.Lock()
@@ -100,6 +102,12 @@ class LiveRunner:
 
         selected_symbols = symbols or self.settings.universe.symbols
         selected_timeframes = timeframes or self.settings.timeframes.live
+        execution_pairs = self._resolve_execution_pairs(
+            symbols=selected_symbols,
+            timeframes=selected_timeframes,
+        )
+        self._timeframes_by_symbol = _timeframes_by_symbol(execution_pairs)
+        selected_symbols = list(self._timeframes_by_symbol.keys())
         effective_runtime = (
             runtime_minutes if runtime_minutes is not None else self.settings.live.runtime_minutes
         )
@@ -111,7 +119,7 @@ class LiveRunner:
             await asyncio.to_thread(
                 self._prime_warmup_state,
                 selected_symbols,
-                selected_timeframes,
+                self._timeframes_by_symbol,
                 effective_warmup,
             )
 
@@ -124,7 +132,6 @@ class LiveRunner:
                 self._consume_market_stream(
                     market=market,
                     symbols=group_symbols,
-                    timeframes=selected_timeframes,
                 ),
                 name=f"live-{market}",
             )
@@ -191,7 +198,6 @@ class LiveRunner:
         self,
         market: str,
         symbols: list[str],
-        timeframes: list[str],
     ) -> None:
         attempts = 0
         while not self._stop_event.is_set():
@@ -200,7 +206,7 @@ class LiveRunner:
                     if self._stop_event.is_set():
                         return
                     attempts = 0
-                    await self._handle_live_bar(live_bar, timeframes)
+                    await self._handle_live_bar(live_bar)
 
                 if self._stop_event.is_set():
                     return
@@ -243,7 +249,7 @@ class LiveRunner:
             except Exception as exc:
                 raise RuntimeError(f"Fatal error in {market} live stream: {exc}") from exc
 
-    async def _handle_live_bar(self, live_bar: LiveBar, timeframes: list[str]) -> None:
+    async def _handle_live_bar(self, live_bar: LiveBar) -> None:
         async with self._lock:
             self._bars_received += 1
             symbol = live_bar.symbol.upper()
@@ -277,6 +283,12 @@ class LiveRunner:
                 volume=live_bar.volume,
             )
 
+            timeframes = self._timeframes_by_symbol.get(symbol, [])
+            if self.settings.strategy.strict_routing and not timeframes:
+                raise RuntimeError(
+                    "Strict routing violation: no live execution timeframes for "
+                    f"{symbol}"
+                )
             for timeframe in timeframes:
                 next_bar = self._next_completed_timeframe_bar(
                     symbol=symbol,
@@ -446,7 +458,17 @@ class LiveRunner:
             symbol=bar.symbol,
             timeframe=bar.timeframe,
             ts=bar.ts,
-            close=bar.close,
+            source_value=_strategy_source_value(
+                open_=bar.open,
+                high=bar.high,
+                low=bar.low,
+                close=bar.close,
+                price_basis=self.settings.strategy.price_basis,
+            ),
+        )
+        route_context = self._detector.build_route_context(
+            bar=bar,
+            sma_states=sma_states,
         )
         new_strikes, new_signals = self._detector.detect(
             bar=bar,
@@ -473,6 +495,7 @@ class LiveRunner:
                 position,
                 bar=bar,
                 proxy_prices=self._proxy_prices,
+                route_context=route_context,
             )
             position_events.extend(events)
             if not position.closed:
@@ -602,7 +625,7 @@ class LiveRunner:
     def _prime_warmup_state(
         self,
         symbols: list[str],
-        timeframes: list[str],
+        timeframes_by_symbol: dict[str, list[str]],
         warmup_minutes: int,
     ) -> None:
         end = pd.Timestamp.now(tz="UTC").floor("min") - pd.Timedelta(minutes=1)
@@ -650,7 +673,7 @@ class LiveRunner:
             self._proxy_prices[symbol] = float(normalized.iloc[-1]["close"])
 
             last_source_ts = pd.Timestamp(normalized.iloc[-1]["ts"]).tz_convert("UTC")
-            for timeframe in timeframes:
+            for timeframe in timeframes_by_symbol.get(symbol, []):
                 if timeframe == "1m":
                     frame = normalized
                 else:
@@ -704,7 +727,13 @@ class LiveRunner:
             symbol=symbol,
             timeframe=timeframe,
             ts=ts.to_pydatetime(),
-            close=close,
+            source_value=_strategy_source_value(
+                open_=open_,
+                high=high,
+                low=low,
+                close=close,
+                price_basis=self.settings.strategy.price_basis,
+            ),
         )
 
     def _default_stream_factory(self, market: str, symbols: list[str]) -> AsyncIterator[LiveBar]:
@@ -749,6 +778,7 @@ class LiveRunner:
         self._source_1m_by_symbol: dict[str, pd.DataFrame] = {}
         self._history_by_key: dict[tuple[str, str], pd.DataFrame] = {}
         self._active_positions_by_key: dict[tuple[str, str], list[ManagedPosition]] = {}
+        self._timeframes_by_symbol: dict[str, list[str]] = {}
         self._proxy_prices: dict[str, float] = {}
         self._last_processed_ts: dict[tuple[str, str], pd.Timestamp] = {}
         self._session_windows_by_date: dict[str, tuple[pd.Timestamp, pd.Timestamp] | None] = {}
@@ -797,25 +827,19 @@ class LiveRunner:
         self._progress_callback(payload)
 
     def _init_pipeline_components(self) -> None:
-        periods = sorted({period for outfit in self._outfits for period in outfit.periods})
-        self._sma_engine = SMAEngine(periods)
-        classifier = SignalClassifier(
-            volatility_threshold=self.settings.signal.volatility_percentile_threshold
-        )
-        required_history = max(
-            classifier.drawdown_window + 1,
-            classifier.atr_window + classifier.volatility_window - 1,
-        )
-        self._history_window = max(64, required_history + 8)
-        self._source_window = max(10_000, self._history_window * 16)
         self._detector = StrikeDetector(
             outfits=self._outfits,
+            routes=self.settings.strategy.routes,
+            strict_routing=self.settings.strategy.strict_routing,
             tolerance=self.settings.signal.tolerance,
-            trigger_mode=self.settings.signal.trigger_mode,
-            long_break=self.settings.risk.long_break,
-            short_break=self.settings.risk.short_break,
-            classifier=classifier,
+            trigger_mode=self.settings.strategy.trigger_mode,
         )
+        periods = sorted(self._detector.required_periods())
+        if not periods:
+            periods = sorted({period for outfit in self._outfits for period in outfit.periods})
+        self._sma_engine = SMAEngine(periods)
+        self._history_window = max(64, max(periods, default=2) + 8)
+        self._source_window = max(10_000, self._history_window * 16)
         self._risk_manager = RiskManager(
             long_break=self.settings.risk.long_break,
             short_break=self.settings.risk.short_break,
@@ -826,7 +850,57 @@ class LiveRunner:
                 symbol: migration.model_dump()
                 for symbol, migration in self.settings.risk.migrations.items()
             },
+            routes=self._routes_by_id,
+            allow_same_bar_exit=self.settings.strategy.allow_same_bar_exit,
         )
+
+    def _resolve_execution_pairs(
+        self,
+        symbols: list[str],
+        timeframes: list[str],
+    ) -> list[tuple[str, str]]:
+        normalized_symbols = [symbol.upper() for symbol in symbols]
+        if not self.settings.strategy.strict_routing:
+            return [
+                (symbol, timeframe)
+                for symbol in normalized_symbols
+                for timeframe in timeframes
+            ]
+
+        configured_routes = self.settings.strategy.routes
+        configured_symbols = {route.symbol for route in configured_routes}
+        configured_timeframes = {route.timeframe for route in configured_routes}
+        selected = [
+            (route.symbol, route.timeframe)
+            for route in configured_routes
+            if route.symbol in normalized_symbols and route.timeframe in timeframes
+        ]
+        if not selected:
+            raise RuntimeError(
+                "Strict routing preflight failed for run-live: requested symbols/timeframes "
+                "do not match any configured route."
+            )
+
+        missing_symbols = sorted(set(normalized_symbols).difference(configured_symbols))
+        missing_timeframes = sorted(set(timeframes).difference(configured_timeframes))
+        if missing_symbols or missing_timeframes:
+            details: list[str] = []
+            if missing_symbols:
+                details.append("symbols=" + ",".join(missing_symbols))
+            if missing_timeframes:
+                details.append("timeframes=" + ",".join(missing_timeframes))
+            raise RuntimeError(
+                "Strict routing preflight failed for run-live: requested values outside configured "
+                "routes (" + "; ".join(details) + ")."
+            )
+
+        unique_pairs: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for pair in selected:
+            if pair not in seen:
+                seen.add(pair)
+                unique_pairs.append(pair)
+        return unique_pairs
 
     def _ensure_calendar_sessions_for_range(
         self,
@@ -883,3 +957,28 @@ def _event_identity(event: Any) -> str:
     if hasattr(event, "signal_id"):
         return str(getattr(event, "signal_id"))
     raise ValueError(f"Unsupported event type for idempotent persistence: {type(event)}")
+
+
+def _timeframes_by_symbol(
+    pairs: list[tuple[str, str]],
+) -> dict[str, list[str]]:
+    mapping: dict[str, list[str]] = {}
+    for symbol, timeframe in pairs:
+        values = mapping.setdefault(symbol, [])
+        if timeframe not in values:
+            values.append(timeframe)
+    return mapping
+
+
+def _strategy_source_value(
+    open_: float,
+    high: float,
+    low: float,
+    close: float,
+    price_basis: str,
+) -> float:
+    if price_basis == "close":
+        return close
+    if price_basis == "ohlc4":
+        return (open_ + high + low + close) / 4.0
+    raise RuntimeError(f"Unsupported strategy.price_basis '{price_basis}'")

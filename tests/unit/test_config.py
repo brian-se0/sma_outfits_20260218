@@ -211,3 +211,223 @@ def test_alpaca_data_url_with_path_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="alpaca.data_url must be host-only"):
         load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_strategy_strict_routing_requires_routes(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {"strategy": {"strict_routing": True, "routes": []}}
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="strategy.routes must be non-empty"):
+        load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_strategy_duplicate_route_key_rejected(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    route = {
+        "symbol": "SPY",
+        "timeframe": "1m",
+        "outfit_id": "base2_nvda",
+        "key_period": 16,
+        "side": "LONG",
+        "signal_type": "precision_buy",
+        "micro_periods": [16],
+        "ignore_close_below_key_when_micro_positive": False,
+        "macro_gate": "none",
+        "risk_mode": "singular_penny_only",
+        "stop_offset": 0.01,
+    }
+    config = {
+        "strategy": {
+            "strict_routing": True,
+            "routes": [
+                {"id": "route-1", **route},
+                {"id": "route-2", **route},
+            ],
+        }
+    }
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Duplicate strategy route key"):
+        load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_strategy_route_outfit_and_period_membership_validation(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    outfits_path = tmp_path / "outfits.yaml"
+    outfits_path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: test_outfit",
+                "    periods: [10, 20]",
+                "    description: test",
+                "    source_configuration: test",
+                "    source_ambiguous: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_missing_outfit = {
+        "outfits_path": str(outfits_path),
+        "strategy": {
+            "strict_routing": True,
+            "routes": [
+                {
+                    "id": "route-1",
+                    "symbol": "SPY",
+                    "timeframe": "1m",
+                    "outfit_id": "unknown_outfit",
+                    "key_period": 10,
+                    "side": "LONG",
+                    "signal_type": "precision_buy",
+                    "micro_periods": [10],
+                    "ignore_close_below_key_when_micro_positive": False,
+                    "macro_gate": "none",
+                    "risk_mode": "singular_penny_only",
+                    "stop_offset": 0.01,
+                }
+            ],
+        },
+    }
+    missing_outfit_path = tmp_path / "missing_outfit.yaml"
+    missing_outfit_path.write_text(
+        yaml.safe_dump(config_missing_outfit),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="unknown outfit_id"):
+        load_settings(config_path=missing_outfit_path, env_path=env_path)
+
+    config_bad_period = {
+        "outfits_path": str(outfits_path),
+        "strategy": {
+            "strict_routing": True,
+            "routes": [
+                {
+                    "id": "route-1",
+                    "symbol": "SPY",
+                    "timeframe": "1m",
+                    "outfit_id": "test_outfit",
+                    "key_period": 99,
+                    "side": "LONG",
+                    "signal_type": "precision_buy",
+                    "micro_periods": [10],
+                    "ignore_close_below_key_when_micro_positive": False,
+                    "macro_gate": "none",
+                    "risk_mode": "singular_penny_only",
+                    "stop_offset": 0.01,
+                }
+            ],
+        },
+    }
+    bad_period_path = tmp_path / "bad_period.yaml"
+    bad_period_path.write_text(
+        yaml.safe_dump(config_bad_period),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="period\\(s\\) not present in outfit"):
+        load_settings(config_path=bad_period_path, env_path=env_path)
+
+
+def test_strategy_ambiguity_policy_fail_rejects_ambiguous_outfit(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    outfits_path = tmp_path / "outfits.yaml"
+    outfits_path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: ambiguous_outfit",
+                "    periods: [10]",
+                "    description: test",
+                "    source_configuration: test",
+                "    source_ambiguous: true",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {
+        "outfits_path": str(outfits_path),
+        "strategy": {
+            "ambiguity_policy": "fail",
+            "strict_routing": True,
+            "routes": [
+                {
+                    "id": "route-1",
+                    "symbol": "SPY",
+                    "timeframe": "1m",
+                    "outfit_id": "ambiguous_outfit",
+                    "key_period": 10,
+                    "side": "LONG",
+                    "signal_type": "precision_buy",
+                    "micro_periods": [10],
+                    "ignore_close_below_key_when_micro_positive": False,
+                    "macro_gate": "none",
+                    "risk_mode": "singular_penny_only",
+                    "stop_offset": 0.01,
+                }
+            ],
+        },
+    }
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="references ambiguous outfit"):
+        load_settings(config_path=config_path, env_path=env_path)

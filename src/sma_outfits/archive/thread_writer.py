@@ -19,6 +19,7 @@ def append_thread_markdown(
         f"### {signal.signal_type} | {strike.symbol} | {strike.timeframe}\n"
         f"- signal_id: `{signal.id}`\n"
         f"- strike_id: `{strike.id}`\n"
+        f"- route_id: `{signal.route_id}`\n"
         f"- side: `{signal.side}`\n"
         f"- entry: `{signal.entry:.2f}`\n"
         f"- stop: `{signal.stop:.2f}`\n"

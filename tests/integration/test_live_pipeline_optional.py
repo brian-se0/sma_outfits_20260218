@@ -29,6 +29,7 @@ def test_optional_alpaca_live_stream_one_hour() -> None:
     live_settings.universe.symbols = [symbol]
     live_settings.universe.symbol_markets[symbol] = market
     live_settings.timeframes.live = [timeframe]
+    live_settings.strategy.strict_routing = False
     live_settings.archive.enabled = False
 
     storage = StorageManager(Path(live_settings.storage_root))

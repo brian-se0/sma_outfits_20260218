@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from sma_outfits.config.models import RouteRule
 from sma_outfits.events import BarEvent, PositionEvent, SignalEvent
+from sma_outfits.signals.detector import RouteBarContext
 from sma_outfits.utils import stable_id
 
 
@@ -16,15 +18,12 @@ class ManagedPosition:
     entry: float
     stop: float
     opened_ts: datetime
+    route_id: str
     remaining_qty: float = 1.0
-    partial_taken: bool = False
     closed: bool = False
-    bars_since_extreme: int = 0
-    extreme_price: float = field(default=0.0)
-    risk_unit: float = field(default=0.0)
+    risk_unit: float = 0.0
 
     def __post_init__(self) -> None:
-        self.extreme_price = self.entry
         self.risk_unit = abs(self.entry - self.stop)
         if self.risk_unit <= 0:
             raise ValueError("position stop must differ from entry")
@@ -40,15 +39,21 @@ class RiskManager:
         timeout_bars: int = 120,
         *,
         migrations: dict[str, Any],
+        routes: dict[str, RouteRule],
+        allow_same_bar_exit: bool = False,
     ) -> None:
         self.long_break = long_break
         self.short_break = short_break
         self.partial_take_r = partial_take_r
         self.final_take_r = final_take_r
         self.timeout_bars = timeout_bars
+        self.allow_same_bar_exit = allow_same_bar_exit
         if not isinstance(migrations, dict):
             raise TypeError("migrations must be an explicit dict")
+        if not isinstance(routes, dict):
+            raise TypeError("routes must be an explicit dict")
         self.migrations = migrations
+        self.routes = routes
 
     def open_position(
         self,
@@ -56,13 +61,20 @@ class RiskManager:
         symbol: str,
         ts: datetime,
     ) -> ManagedPosition:
+        route = self._require_route(signal.route_id)
+        stop = (
+            signal.entry - route.stop_offset
+            if signal.side == "LONG"
+            else signal.entry + route.stop_offset
+        )
         return ManagedPosition(
             signal_id=signal.id,
             symbol=symbol,
             side=signal.side,
             entry=signal.entry,
-            stop=signal.stop,
+            stop=round(float(stop), 6),
             opened_ts=ts,
+            route_id=signal.route_id,
         )
 
     def evaluate_bar(
@@ -70,11 +82,22 @@ class RiskManager:
         position: ManagedPosition,
         bar: BarEvent,
         proxy_prices: dict[str, float],
+        route_context: RouteBarContext | None = None,
     ) -> list[PositionEvent]:
         if position.closed:
             return []
         if not isinstance(proxy_prices, dict):
             raise TypeError("proxy_prices must be an explicit dict")
+
+        if not self.allow_same_bar_exit and bar.ts == position.opened_ts:
+            return []
+
+        route = self._require_route(position.route_id)
+        if route_context is not None and route_context.route.id != route.id:
+            raise RuntimeError(
+                "Route context mismatch: "
+                f"position route_id={route.id}, context route_id={route_context.route.id}"
+            )
 
         events: list[PositionEvent] = []
         migration = self.migrations.get(position.symbol)
@@ -110,7 +133,18 @@ class RiskManager:
                     )
                     return events
 
+        if route.risk_mode != "singular_penny_only":
+            raise RuntimeError(
+                f"Unsupported route risk_mode '{route.risk_mode}' for route '{route.id}'"
+            )
+
         if self._is_stop_hit(position, bar):
+            if (
+                route.ignore_close_below_key_when_micro_positive
+                and route_context is not None
+                and route_context.micro_positive
+            ):
+                return []
             events.append(
                 self._close_event(
                     position,
@@ -120,85 +154,18 @@ class RiskManager:
                 )
             )
             return events
-
-        r_unit = position.risk_unit
-
-        self._update_extreme(position, bar)
-
-        partial_target = (
-            position.entry + self.partial_take_r * r_unit
-            if position.side == "LONG"
-            else position.entry - self.partial_take_r * r_unit
-        )
-        final_target = (
-            position.entry + self.final_take_r * r_unit
-            if position.side == "LONG"
-            else position.entry - self.final_take_r * r_unit
-        )
-
-        if not position.partial_taken and self._target_hit(position.side, bar, partial_target):
-            partial_qty = round(position.remaining_qty * 0.25, 6)
-            if partial_qty > 0:
-                position.remaining_qty = round(position.remaining_qty - partial_qty, 6)
-                position.partial_taken = True
-                position.stop = position.entry
-                events.append(
-                    self._event(
-                        position,
-                        ts=bar.ts,
-                        action="partial_take",
-                        qty=partial_qty,
-                        price=partial_target,
-                        reason="+1R_partial_and_breakeven_stop",
-                    )
-                )
-
-        if self._target_hit(position.side, bar, final_target) and position.remaining_qty > 0:
-            events.append(
-                self._close_event(
-                    position,
-                    ts=bar.ts,
-                    price=final_target,
-                    reason="+3R_final_take",
-                )
-            )
-            return events
-
-        if position.bars_since_extreme >= self.timeout_bars and position.remaining_qty > 0:
-            events.append(
-                self._close_event(
-                    position,
-                    ts=bar.ts,
-                    price=bar.close,
-                    reason="timeout",
-                )
-            )
-            return events
         return events
+
+    def _require_route(self, route_id: str) -> RouteRule:
+        route = self.routes.get(route_id)
+        if route is None:
+            raise RuntimeError(f"Unknown route_id '{route_id}' in risk manager")
+        return route
 
     def _is_stop_hit(self, position: ManagedPosition, bar: BarEvent) -> bool:
         if position.side == "LONG":
             return bar.low <= position.stop
         return bar.high >= position.stop
-
-    @staticmethod
-    def _target_hit(side: str, bar: BarEvent, target: float) -> bool:
-        if side == "LONG":
-            return bar.high >= target
-        return bar.low <= target
-
-    @staticmethod
-    def _update_extreme(position: ManagedPosition, bar: BarEvent) -> None:
-        new_extreme = (
-            bar.high > position.extreme_price
-            if position.side == "LONG"
-            else bar.low < position.extreme_price
-        )
-        if new_extreme:
-            position.extreme_price = bar.high if position.side == "LONG" else bar.low
-            position.bars_since_extreme = 0
-            return
-        position.bars_since_extreme += 1
 
     def _close_event(
         self,

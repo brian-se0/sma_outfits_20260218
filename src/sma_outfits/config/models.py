@@ -37,6 +37,7 @@ DEFAULT_SYMBOLS = [
     "TSLA",
     "AMD",
     "GME",
+    "RWM",
     "SMH",
     "FAS",
     "FAZ",
@@ -71,6 +72,7 @@ DEFAULT_SYMBOL_MARKETS = {
     "TSLA": "stocks",
     "AMD": "stocks",
     "GME": "stocks",
+    "RWM": "stocks",
     "SMH": "stocks",
     "FAS": "stocks",
     "FAZ": "stocks",
@@ -95,6 +97,36 @@ DEFAULT_LIVE_TIMEFRAMES = [
 
 DEFAULT_DERIVED_TIMEFRAMES = ["1W", "1M", "1Q"]
 DEFAULT_RESAMPLE_ANCHORS = {"1W": "W-FRI", "1M": "ME", "1Q": "QE"}
+DEFAULT_STRATEGY_ROUTES = [
+    {
+        "id": "qqq_1h_author",
+        "symbol": "QQQ",
+        "timeframe": "1h",
+        "outfit_id": "base2_nvda",
+        "key_period": 512,
+        "side": "LONG",
+        "signal_type": "optimized_buy",
+        "micro_periods": [16, 32, 64, 128, 256],
+        "ignore_close_below_key_when_micro_positive": True,
+        "macro_gate": "nas",
+        "risk_mode": "singular_penny_only",
+        "stop_offset": 0.01,
+    },
+    {
+        "id": "rwm_30m_author",
+        "symbol": "RWM",
+        "timeframe": "30m",
+        "outfit_id": "svix_211",
+        "key_period": 844,
+        "side": "LONG",
+        "signal_type": "magnetized_buy",
+        "micro_periods": [26, 52, 116, 211, 422],
+        "ignore_close_below_key_when_micro_positive": False,
+        "macro_gate": "none",
+        "risk_mode": "singular_penny_only",
+        "stop_offset": 0.01,
+    },
+]
 
 REQUIRED_ENV_KEYS = (
     "ALPACA_API_KEY",
@@ -295,6 +327,98 @@ class SignalConfig(BaseModel):
         return value
 
 
+class RouteRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    symbol: str
+    timeframe: str
+    outfit_id: str
+    key_period: int
+    side: Literal["LONG", "SHORT"]
+    signal_type: Literal[
+        "precision_buy",
+        "optimized_buy",
+        "magnetized_buy",
+        "automated_short",
+    ]
+    micro_periods: list[int]
+    ignore_close_below_key_when_micro_positive: bool = False
+    macro_gate: Literal["none", "spx", "nas", "dji"] = "none"
+    risk_mode: Literal["singular_penny_only"] = "singular_penny_only"
+    stop_offset: float = 0.01
+
+    @field_validator("id", "outfit_id")
+    @classmethod
+    def _non_empty_text(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("route value must be non-empty")
+        return candidate
+
+    @field_validator("symbol")
+    @classmethod
+    def _normalize_symbol(cls, value: str) -> str:
+        candidate = value.strip().upper()
+        if not candidate:
+            raise ValueError("strategy route symbol must be non-empty")
+        return candidate
+
+    @field_validator("timeframe")
+    @classmethod
+    def _validate_route_timeframe(cls, value: str) -> str:
+        candidate = value.strip()
+        if candidate not in SUPPORTED_TIMEFRAMES:
+            raise ValueError(
+                f"Unsupported route timeframe '{candidate}'. Supported: {SUPPORTED_TIMEFRAMES}"
+            )
+        return candidate
+
+    @field_validator("key_period")
+    @classmethod
+    def _validate_key_period(cls, value: int) -> int:
+        if value < 1 or value > 999:
+            raise ValueError("strategy route key_period must be within [1, 999]")
+        return value
+
+    @field_validator("micro_periods")
+    @classmethod
+    def _validate_micro_periods(cls, value: list[int]) -> list[int]:
+        if not value:
+            raise ValueError("strategy route micro_periods must be non-empty")
+        out: list[int] = []
+        for period in value:
+            if isinstance(period, bool) or not isinstance(period, int):
+                raise ValueError("strategy route micro_periods must contain integers only")
+            if period < 1 or period > 999:
+                raise ValueError("strategy route micro_periods must be within [1, 999]")
+            out.append(period)
+        return out
+
+    @field_validator("stop_offset")
+    @classmethod
+    def _validate_stop_offset(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("strategy route stop_offset must be > 0")
+        return value
+
+
+def _default_strategy_routes() -> list[RouteRule]:
+    return [RouteRule.model_validate(route) for route in DEFAULT_STRATEGY_ROUTES]
+
+
+class StrategyConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["author_v1"] = "author_v1"
+    price_basis: Literal["ohlc4", "close"] = "ohlc4"
+    trigger_mode: Literal["close_touch_or_cross"] = "close_touch_or_cross"
+    strict_routing: bool = True
+    allow_same_bar_exit: bool = False
+    ambiguity_policy: Literal["fail"] = "fail"
+    routes: list[RouteRule] = Field(default_factory=_default_strategy_routes)
+
+
 class RiskMigrationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -394,6 +518,7 @@ class Settings(BaseModel):
     sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     timeframes: TimeframesConfig = Field(default_factory=TimeframesConfig)
     signal: SignalConfig = Field(default_factory=SignalConfig)
+    strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     archive: ArchiveConfig = Field(default_factory=ArchiveConfig)
     ingest: IngestConfig = Field(default_factory=IngestConfig)
@@ -405,6 +530,60 @@ class Settings(BaseModel):
     @property
     def all_timeframes(self) -> list[str]:
         return list(dict.fromkeys([*self.timeframes.live, *self.timeframes.derived]))
+
+    @model_validator(mode="after")
+    def _validate_strategy_routes(self) -> Settings:
+        routes = self.strategy.routes
+        if self.strategy.strict_routing and not routes:
+            raise ValueError(
+                "strategy.routes must be non-empty when strategy.strict_routing=true"
+            )
+
+        seen_route_ids: set[str] = set()
+        seen_route_keys: set[tuple[str, str]] = set()
+        for route in routes:
+            if route.id in seen_route_ids:
+                raise ValueError(f"Duplicate strategy route id '{route.id}'")
+            seen_route_ids.add(route.id)
+            if self.strategy.strict_routing:
+                route_key = (route.symbol, route.timeframe)
+                if route_key in seen_route_keys:
+                    raise ValueError(
+                        "Duplicate strategy route key for strict routing: "
+                        f"{route.symbol}/{route.timeframe}"
+                    )
+                seen_route_keys.add(route_key)
+
+        outfit_metadata = _load_outfit_metadata(Path(self.outfits_path))
+        for index, route in enumerate(routes):
+            metadata = outfit_metadata.get(route.outfit_id)
+            if metadata is None:
+                raise ValueError(
+                    "strategy.routes[{}] references unknown outfit_id '{}'".format(
+                        index,
+                        route.outfit_id,
+                    )
+                )
+            periods = metadata["periods"]
+            missing = [
+                period
+                for period in [route.key_period, *route.micro_periods]
+                if period not in periods
+            ]
+            if missing:
+                raise ValueError(
+                    "strategy.routes[{}] includes period(s) not present in outfit '{}': {}".format(
+                        index,
+                        route.outfit_id,
+                        sorted(set(missing)),
+                    )
+                )
+            if self.strategy.ambiguity_policy == "fail" and metadata["source_ambiguous"]:
+                raise ValueError(
+                    "strategy.routes[{}] references ambiguous outfit '{}' while "
+                    "strategy.ambiguity_policy=fail".format(index, route.outfit_id)
+                )
+        return self
 
 
 def read_env_local(path: Path = Path(".env.local")) -> dict[str, str]:
@@ -476,3 +655,35 @@ def load_settings(
     parsed["sessions"] = dict(sessions)
 
     return Settings.model_validate(parsed)
+
+
+def _load_outfit_metadata(path: Path) -> dict[str, dict[str, object]]:
+    if not path.exists():
+        raise FileNotFoundError(f"Outfit catalog not found: {path}")
+    parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(parsed, dict) or "outfits" not in parsed:
+        raise ValueError("Outfit catalog must be a map with key 'outfits'")
+    rows = parsed["outfits"]
+    if not isinstance(rows, list):
+        raise ValueError("Outfit catalog 'outfits' must be a list")
+
+    metadata: dict[str, dict[str, object]] = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError("Each outfit row must be a map")
+        outfit_id = row.get("id")
+        if not isinstance(outfit_id, str) or not outfit_id.strip():
+            raise ValueError(f"Outfit row[{index}] id must be non-empty string")
+        periods_raw = row.get("periods")
+        if not isinstance(periods_raw, list) or not periods_raw:
+            raise ValueError(f"Outfit row[{index}] periods must be a non-empty list")
+        if any(not isinstance(period, int) or isinstance(period, bool) for period in periods_raw):
+            raise ValueError(f"Outfit row[{index}] periods must contain integers only")
+        source_ambiguous = row.get("source_ambiguous")
+        if not isinstance(source_ambiguous, bool):
+            raise ValueError(f"Outfit row[{index}] source_ambiguous must be boolean")
+        metadata[outfit_id.strip()] = {
+            "periods": set(periods_raw),
+            "source_ambiguous": source_ambiguous,
+        }
+    return metadata

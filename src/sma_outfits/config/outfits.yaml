@@ -105,8 +105,8 @@ outfits:
     description: "France's president seat"
     source_ambiguous: false
   - id: svix_211
-    source_configuration: "26/52/106/211/422/844 (211)"
-    periods: [26, 52, 106, 211, 422, 844]
+    source_configuration: "26/52/116/211/422/844 (211)"
+    periods: [26, 52, 116, 211, 422, 844]
     description: "SVIX"
     source_ambiguous: false
   - id: turkiye_president_12

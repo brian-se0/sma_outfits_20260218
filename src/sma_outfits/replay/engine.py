@@ -7,6 +7,7 @@ from typing import Callable
 import pandas as pd
 
 from sma_outfits.archive.thread_writer import append_thread_markdown
+from sma_outfits.config.models import RouteRule
 from sma_outfits.config.models import Settings
 from sma_outfits.data.storage import StorageManager
 from sma_outfits.events import (
@@ -20,7 +21,6 @@ from sma_outfits.events import (
 from sma_outfits.indicators.sma_engine import SMAEngine
 from sma_outfits.reporting.summary import build_summary
 from sma_outfits.risk.manager import ManagedPosition, RiskManager
-from sma_outfits.signals.classifier import SignalClassifier
 from sma_outfits.signals.detector import StrikeDetector, load_outfits
 
 
@@ -42,27 +42,24 @@ class ReplayEngine:
         self.storage = storage
         outfits_path = self._resolve_outfits_path(settings.outfits_path)
         self.outfits = load_outfits(outfits_path)
+        self._routes_by_id: dict[str, RouteRule] = {
+            route.id: route for route in self.settings.strategy.routes
+        }
         self._init_pipeline_components()
 
     def _init_pipeline_components(self) -> None:
-        periods = sorted({period for outfit in self.outfits for period in outfit.periods})
-        classifier = SignalClassifier(
-            volatility_threshold=self.settings.signal.volatility_percentile_threshold
-        )
-        required_history = max(
-            classifier.drawdown_window + 1,
-            classifier.atr_window + classifier.volatility_window - 1,
-        )
-        self._history_window = max(64, required_history + 8)
-        self.sma_engine = SMAEngine(periods)
         self.detector = StrikeDetector(
             outfits=self.outfits,
+            routes=self.settings.strategy.routes,
+            strict_routing=self.settings.strategy.strict_routing,
             tolerance=self.settings.signal.tolerance,
-            trigger_mode=self.settings.signal.trigger_mode,
-            long_break=self.settings.risk.long_break,
-            short_break=self.settings.risk.short_break,
-            classifier=classifier,
+            trigger_mode=self.settings.strategy.trigger_mode,
         )
+        periods = sorted(self.detector.required_periods())
+        if not periods:
+            periods = sorted({period for outfit in self.outfits for period in outfit.periods})
+        self._history_window = max(64, max(periods, default=2) + 8)
+        self.sma_engine = SMAEngine(periods)
         self.risk_manager = RiskManager(
             long_break=self.settings.risk.long_break,
             short_break=self.settings.risk.short_break,
@@ -73,6 +70,8 @@ class ReplayEngine:
                 symbol: migration.model_dump()
                 for symbol, migration in self.settings.risk.migrations.items()
             },
+            routes=self._routes_by_id,
+            allow_same_bar_exit=self.settings.strategy.allow_same_bar_exit,
         )
 
     def run(
@@ -85,7 +84,8 @@ class ReplayEngine:
     ) -> ReplayResult:
         self._init_pipeline_components()
         symbols = symbols or self.settings.universe.symbols
-        timeframes = timeframes or self.settings.all_timeframes
+        timeframes = timeframes or self.settings.timeframes.live
+        execution_pairs = self._resolve_execution_pairs(symbols=symbols, timeframes=timeframes)
 
         strikes: list[StrikeEvent] = []
         signals: list[SignalEvent] = []
@@ -95,14 +95,13 @@ class ReplayEngine:
         jobs: list[tuple[str, str, pd.DataFrame]] = []
         total_bars = 0
 
-        for symbol in symbols:
-            for timeframe in timeframes:
-                bars = self.storage.read_bars(symbol, timeframe, start=start, end=end)
-                if bars.empty:
-                    continue
-                bars = bars.sort_values("ts").reset_index(drop=True)
-                jobs.append((symbol, timeframe, bars))
-                total_bars += len(bars)
+        for symbol, timeframe in execution_pairs:
+            bars = self.storage.read_bars(symbol, timeframe, start=start, end=end)
+            if bars.empty:
+                continue
+            bars = bars.sort_values("ts").reset_index(drop=True)
+            jobs.append((symbol, timeframe, bars))
+            total_bars += len(bars)
 
         if total_bars == 0:
             raise RuntimeError("Replay aborted: no stored bars found for requested symbols/timeframes")
@@ -131,11 +130,19 @@ class ReplayEngine:
                     progress_callback(processed_bars, total_bars, symbol, timeframe, bar_ts)
 
                 history = self._append_history(history, bar)
+                source_value = _strategy_source_value(
+                    bar=bar,
+                    price_basis=self.settings.strategy.price_basis,
+                )
                 sma_states = self.sma_engine.update(
                     symbol=bar.symbol,
                     timeframe=bar.timeframe,
                     ts=bar.ts,
-                    close=bar.close,
+                    source_value=source_value,
+                )
+                route_context = self.detector.build_route_context(
+                    bar=bar,
+                    sma_states=sma_states,
                 )
                 new_strikes, new_signals = self.detector.detect(
                     bar=bar,
@@ -160,6 +167,7 @@ class ReplayEngine:
                         position,
                         bar=bar,
                         proxy_prices=proxy_prices,
+                        route_context=route_context,
                     )
                     position_events.extend(events)
                     if not position.closed:
@@ -248,9 +256,65 @@ class ReplayEngine:
             )
         return candidate
 
+    def _resolve_execution_pairs(
+        self,
+        symbols: list[str],
+        timeframes: list[str],
+    ) -> list[tuple[str, str]]:
+        normalized_symbols = [symbol.upper() for symbol in symbols]
+        if not self.settings.strategy.strict_routing:
+            return [
+                (symbol, timeframe)
+                for symbol in normalized_symbols
+                for timeframe in timeframes
+            ]
+
+        configured_routes = self.settings.strategy.routes
+        configured_symbols = {route.symbol for route in configured_routes}
+        configured_timeframes = {route.timeframe for route in configured_routes}
+        selected = [
+            (route.symbol, route.timeframe)
+            for route in configured_routes
+            if route.symbol in normalized_symbols and route.timeframe in timeframes
+        ]
+        if not selected:
+            raise RuntimeError(
+                "Strict routing preflight failed for replay: requested symbols/timeframes "
+                "do not match any configured route."
+            )
+
+        missing_symbols = sorted(set(normalized_symbols).difference(configured_symbols))
+        missing_timeframes = sorted(set(timeframes).difference(configured_timeframes))
+        if missing_symbols or missing_timeframes:
+            details: list[str] = []
+            if missing_symbols:
+                details.append("symbols=" + ",".join(missing_symbols))
+            if missing_timeframes:
+                details.append("timeframes=" + ",".join(missing_timeframes))
+            raise RuntimeError(
+                "Strict routing preflight failed for replay: requested values outside configured "
+                "routes (" + "; ".join(details) + ")."
+            )
+
+        unique_pairs: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for pair in selected:
+            if pair not in seen:
+                seen.add(pair)
+                unique_pairs.append(pair)
+        return unique_pairs
+
 
 def _to_utc_timestamp(value: object) -> pd.Timestamp:
     ts = pd.Timestamp(value)
     if ts.tzinfo is None:
         return ts.tz_localize("UTC")
     return ts.tz_convert("UTC")
+
+
+def _strategy_source_value(bar: BarEvent, price_basis: str) -> float:
+    if price_basis == "close":
+        return bar.close
+    if price_basis == "ohlc4":
+        return (bar.open + bar.high + bar.low + bar.close) / 4.0
+    raise RuntimeError(f"Unsupported strategy.price_basis '{price_basis}'")

@@ -30,15 +30,21 @@ class SMAEngine:
         symbol: str,
         timeframe: str,
         ts: datetime,
-        close: float,
+        close: float | None = None,
+        source_value: float | None = None,
     ) -> dict[int, SMAState]:
+        if source_value is not None and close is not None:
+            raise ValueError("Pass either close or source_value to SMAEngine.update, not both")
+        if source_value is None and close is None:
+            raise ValueError("SMAEngine.update requires close or source_value")
+
         key = (symbol, timeframe)
         period_state = self._state.setdefault(
             key,
             {period: _RollingState() for period in self.periods},
         )
         out: dict[int, SMAState] = {}
-        close_value = float(close)
+        close_value = float(source_value if source_value is not None else close)
         for period, rolling_state in period_state.items():
             rolling_state.values.append(close_value)
             rolling_state.rolling_sum += close_value

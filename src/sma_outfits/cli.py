@@ -38,9 +38,79 @@ def _effective_timeframes(user_timeframes: str, settings: Settings) -> list[str]
     return dedupe_keep_order(parse_csv(user_timeframes))
 
 
+def _effective_strategy_symbols(user_symbols: str, settings: Settings) -> list[str]:
+    if user_symbols:
+        return dedupe_keep_order([value.upper() for value in parse_csv(user_symbols)])
+    if settings.strategy.strict_routing:
+        return dedupe_keep_order([route.symbol for route in settings.strategy.routes])
+    return settings.universe.symbols
+
+
+def _effective_strategy_timeframes(
+    user_timeframes: str,
+    settings: Settings,
+    symbols: list[str],
+) -> list[str]:
+    if user_timeframes:
+        return dedupe_keep_order(parse_csv(user_timeframes))
+    if settings.strategy.strict_routing:
+        symbol_set = {symbol.upper() for symbol in symbols}
+        values = [
+            route.timeframe
+            for route in settings.strategy.routes
+            if route.symbol in symbol_set
+        ]
+        if values:
+            return dedupe_keep_order(values)
+        return dedupe_keep_order([route.timeframe for route in settings.strategy.routes])
+    return settings.timeframes.live
+
+
 def _validate_symbol_market_mappings(symbols: list[str], settings: Settings) -> None:
     for symbol in symbols:
         market_for_symbol(symbol, settings.universe.symbol_markets)
+
+
+def _preflight_strict_route_scope(
+    *,
+    command: str,
+    symbols: list[str],
+    timeframes: list[str],
+    settings: Settings,
+) -> None:
+    if not settings.strategy.strict_routing:
+        return
+    normalized_symbols = [symbol.upper() for symbol in symbols]
+    configured_routes = settings.strategy.routes
+    configured_symbols = {route.symbol for route in configured_routes}
+    configured_timeframes = {route.timeframe for route in configured_routes}
+    selected_pairs = [
+        (route.symbol, route.timeframe)
+        for route in configured_routes
+        if route.symbol in normalized_symbols and route.timeframe in timeframes
+    ]
+    if not selected_pairs:
+        raise RuntimeError(
+            f"Strict routing preflight failed for {command}: requested symbols/timeframes "
+            "do not match any configured route."
+        )
+
+    missing_symbols = sorted(set(normalized_symbols).difference(configured_symbols))
+    missing_timeframes = sorted(set(timeframes).difference(configured_timeframes))
+    if missing_symbols or missing_timeframes:
+        details: list[str] = []
+        if missing_symbols:
+            details.append("symbols=" + ",".join(missing_symbols))
+        if missing_timeframes:
+            details.append("timeframes=" + ",".join(missing_timeframes))
+        configured = ", ".join(
+            f"{route.symbol}/{route.timeframe}" for route in configured_routes
+        )
+        raise RuntimeError(
+            f"Strict routing preflight failed for {command}: requested values outside configured "
+            "strict routes (" + "; ".join(details) + "). "
+            f"Configured routes: {configured}"
+        )
 
 
 @app.command("validate-config")
@@ -115,6 +185,8 @@ def backfill(
 @app.command("run-live")
 def run_live(
     config: Path = typer.Option(Path("configs/settings.example.yaml"), "--config"),
+    symbols: str = typer.Option("", "--symbols", help="CSV symbols override"),
+    timeframes: str = typer.Option("", "--timeframes", help="CSV timeframes override"),
     lookback_hours: int | None = typer.Option(
         None,
         "--lookback-hours",
@@ -134,7 +206,19 @@ def run_live(
     assert_python_runtime()
     settings = _load_runtime_settings(config)
     configure_logging()
-    _validate_symbol_market_mappings(settings.universe.symbols, settings)
+    selected_symbols = _effective_strategy_symbols(symbols, settings)
+    selected_timeframes = _effective_strategy_timeframes(
+        timeframes,
+        settings,
+        selected_symbols,
+    )
+    _validate_symbol_market_mappings(selected_symbols, settings)
+    _preflight_strict_route_scope(
+        command="run-live",
+        symbols=selected_symbols,
+        timeframes=selected_timeframes,
+        settings=settings,
+    )
     storage = StorageManager(Path(settings.storage_root))
     runner = LiveRunner(settings=settings, storage=storage)
     status_line = TerminalStatusLine(label="run-live", enabled=progress)
@@ -168,8 +252,8 @@ def run_live(
     try:
         result = asyncio.run(
             runner.run(
-                symbols=settings.universe.symbols,
-                timeframes=settings.timeframes.live,
+                symbols=selected_symbols,
+                timeframes=selected_timeframes,
                 runtime_minutes=runtime_minutes,
                 warmup_minutes=warmup_minutes,
                 progress_callback=_on_live_progress if progress else None,
@@ -213,9 +297,19 @@ def replay(
     assert_python_runtime()
     settings = _load_runtime_settings(config)
     configure_logging()
-    selected_symbols = _effective_symbols(symbols, settings)
+    selected_symbols = _effective_strategy_symbols(symbols, settings)
     _validate_symbol_market_mappings(selected_symbols, settings)
-    selected_timeframes = _effective_timeframes(timeframes, settings)
+    selected_timeframes = _effective_strategy_timeframes(
+        timeframes,
+        settings,
+        selected_symbols,
+    )
+    _preflight_strict_route_scope(
+        command="replay",
+        symbols=selected_symbols,
+        timeframes=selected_timeframes,
+        settings=settings,
+    )
     start_ts = ensure_utc_timestamp(start)
     end_ts = ensure_utc_timestamp(end)
     storage = StorageManager(Path(settings.storage_root))
