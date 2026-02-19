@@ -1,7 +1,7 @@
 # Alpaca-Only Python Recreation Plan for SMA-Outfits
 
 ## Brief Summary
-Build a new Python codebase that reproduces the repository’s observable workflow: ingest market data, compute multi-timeframe SMA outfits, detect precision strikes, classify signal events, and generate chart+thread archives. The implementation will use only free Alpaca data and will be configuration-first so undocumented behavior remains adjustable without code changes.
+Build a new Python codebase that reproduces the repository’s observable workflow: ingest market data, compute multi-timeframe SMA outfits, detect precision strikes, classify signal events, and generate structured archive logs plus threaded Markdown records. The implementation will use only free Alpaca data and will be configuration-first so undocumented behavior remains adjustable without code changes.
 
 ## Environment and Execution Requirements
 1. Python runtime is fixed to **3.14.3**.
@@ -13,7 +13,7 @@ Build a new Python codebase that reproduces the repository’s observable workfl
 1. Deliver a runnable Python package with CLI and config-driven live/replay workflows.
 2. Support outfit detection across the README outfit catalog and required timeframes.
 3. Persist raw/processed data and signal events locally.
-4. Generate X-style archival outputs (PNG charts + threaded Markdown entries).
+4. Generate archival outputs as machine-friendly logs (JSONL event/archive records) plus threaded Markdown entries.
 5. Provide deterministic backtest/replay and automated tests.
 6. Do not place real broker orders in v1 (alerting/simulation only).
 
@@ -39,7 +39,7 @@ Build a new Python codebase that reproduces the repository’s observable workfl
 |---|---|---|---|
 | `sma-outfits validate-config` | Validate YAML config | `--config` | exit code + validation report |
 | `sma-outfits backfill` | Pull Alpaca historical bars | `--symbols --start --end --timeframes` | parquet datasets + ingest log |
-| `sma-outfits run-live` | Live stream + detect + archive | `--config` | live signal stream + markdown/png artifacts |
+| `sma-outfits run-live` | Live stream + detect + archive | `--config` | live signal stream + JSONL archive/event logs + markdown artifacts |
 | `sma-outfits replay` | Deterministic historical replay | `--config --start --end` | signal events + performance summary |
 | `sma-outfits report` | Build summary docs | `--date` or `--range` | markdown and csv reports |
 
@@ -86,7 +86,7 @@ Build a new Python codebase that reproduces the repository’s observable workfl
 | `StrikeEvent` | `id, symbol, timeframe, outfit_id, period, sma_value, bar_ts, tolerance, trigger_mode` |
 | `SignalEvent` | `id, strike_id, side, signal_type, entry, stop, confidence, session_type` |
 | `PositionEvent` | `id, signal_id, action, qty, price, reason, ts` |
-| `ArchiveRecord` | `signal_id, chart_path, markdown_path, caption, ts` |
+| `ArchiveRecord` | `signal_id, markdown_path, artifact_type, caption, ts` |
 
 ## Repository Structure to Create
 | Path | Responsibility |
@@ -103,7 +103,6 @@ Build a new Python codebase that reproduces the repository’s observable workfl
 | `src/sma_outfits/signals/detector.py` | strike detection logic |
 | `src/sma_outfits/signals/classifier.py` | signal-type classification |
 | `src/sma_outfits/risk/manager.py` | stops, partials, timeout rules |
-| `src/sma_outfits/archive/charts.py` | chart generation (plotly + kaleido) |
 | `src/sma_outfits/archive/thread_writer.py` | markdown thread append/write |
 | `src/sma_outfits/replay/engine.py` | historical replay loop |
 | `src/sma_outfits/monitoring/logging.py` | structured logs/metrics |
@@ -138,8 +137,8 @@ Implement deterministic stop handling, partials at `+1R`, final at `+3R`, timeou
 Acceptance: replay fixtures produce deterministic position lifecycle events.
 
 7. Archival output.  
-Generate X-style candlestick charts with all outfit SMAs, highlight strike level, and append threaded markdown entries using fixed templates.  
-Acceptance: each signal yields one PNG and one markdown block with stable filenames.
+Append threaded Markdown entries using fixed templates and persist machine-friendly archive records in JSONL.  
+Acceptance: each signal yields one archive JSONL record and one markdown block with stable identifiers/filenames.
 
 8. Replay and reporting.  
 Implement `replay` over historical ranges and `report` for daily/period summaries (signal counts, hit rates, R outcomes, top outfits, top symbols).  
@@ -170,7 +169,7 @@ Acceptance: simulated disconnect tests recover without duplicate events.
 7. Risk migration test using AMDL->SMH mapping in config.
 8. Session filter test confirming regular-hours-only behavior.
 9. Resampler correctness test across all supported derived timeframes.
-10. Archive generation test verifies PNG exists and markdown contains required caption fields.
+10. Archive generation test verifies JSONL archive record schema and markdown required caption fields.
 11. End-to-end integration test with mocked Alpaca stream.
 12. Optional live integration test (gated by env vars) for one symbol, one timeframe, one hour runtime.
 
@@ -183,5 +182,5 @@ Acceptance: simulated disconnect tests recover without duplicate events.
 3. Unit tests and integration tests pass in CI.
 4. Live runner can ingest Alpaca data for the default universe for one full session without crash.
 5. Replay produces deterministic, repeatable signal outputs on the same dataset.
-6. Each detected signal has persisted bar context, chart artifact, and markdown thread entry.
+6. Each detected signal has persisted bar context, archive/event log record, and markdown thread entry.
 7. All unresolved author-specific behaviors are configurable and documented in `ASSUMPTIONS.md`.

@@ -11,7 +11,6 @@ def append_thread_markdown(
     root: Path,
     strike: StrikeEvent,
     signal: SignalEvent,
-    chart_path: Path,
 ) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     date_key = pd.Timestamp(strike.bar_ts).tz_convert("America/New_York").strftime("%Y-%m-%d")
@@ -26,7 +25,7 @@ def append_thread_markdown(
         f"- outfit: `{strike.outfit_id}`\n"
         f"- sma_period: `{strike.period}`\n"
         f"- sma_value: `{strike.sma_value:.2f}`\n"
-        f"- chart: `{chart_path.as_posix()}`\n\n"
+        f"- strike_ts_utc: `{pd.Timestamp(strike.bar_ts).tz_convert('UTC').isoformat()}`\n\n"
     )
     with markdown_path.open("a", encoding="utf-8") as handle:
         handle.write(block)

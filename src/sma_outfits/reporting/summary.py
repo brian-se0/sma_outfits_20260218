@@ -23,9 +23,7 @@ def build_summary(
     symbol_counter: Counter[str] = Counter()
     outfit_counter: Counter[str] = Counter()
     for signal in signals:
-        strike = strike_lookup.get(signal.strike_id)
-        if strike is None:
-            continue
+        strike = _require_signal_strike(signal=signal, strike_lookup=strike_lookup)
         symbol_counter[strike.symbol] += 1
         outfit_counter[strike.outfit_id] += 1
 
@@ -47,7 +45,7 @@ def build_summary(
             Counter(
                 str(outcome["close_reason"])
                 for outcome in closed_outcomes
-                if outcome.get("close_reason")
+                if outcome["close_reason"] is not None
             ).items(),
             key=lambda item: item[1],
             reverse=True,
@@ -220,15 +218,15 @@ def _compute_signal_outcomes(
                 close_reason = event.reason
                 close_ts = event.ts
 
-        strike = strike_lookup.get(signal.strike_id)
+        strike = _require_signal_strike(signal=signal, strike_lookup=strike_lookup)
         outcomes.append(
             {
                 "signal_id": signal.id,
                 "signal_type": signal.signal_type,
                 "side": signal.side,
-                "symbol": strike.symbol if strike else "UNKNOWN",
-                "outfit_id": strike.outfit_id if strike else "UNKNOWN",
-                "timeframe": strike.timeframe if strike else "UNKNOWN",
+                "symbol": strike.symbol,
+                "outfit_id": strike.outfit_id,
+                "timeframe": strike.timeframe,
                 "realized_r": realized_r,
                 "closed": closed,
                 "close_reason": close_reason,
@@ -240,8 +238,9 @@ def _compute_signal_outcomes(
 
 def _rate_breakdown(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in rows:
-        grouped[str(row.get(key, "UNKNOWN"))].append(row)
+    for index, row in enumerate(rows):
+        label = _require_breakdown_label(row=row, key=key, index=index)
+        grouped[label].append(row)
 
     output: list[dict[str, Any]] = []
     for label, items in grouped.items():
@@ -260,8 +259,9 @@ def _rate_breakdown(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]
 
 def _r_breakdown(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     grouped: dict[str, list[float]] = defaultdict(list)
-    for row in rows:
-        grouped[str(row.get(key, "UNKNOWN"))].append(float(row["realized_r"]))
+    for index, row in enumerate(rows):
+        label = _require_breakdown_label(row=row, key=key, index=index)
+        grouped[label].append(float(row["realized_r"]))
 
     output: list[dict[str, Any]] = []
     for label, values in grouped.items():
@@ -301,10 +301,19 @@ def _r_bucket_counts(values: list[float]) -> dict[str, int]:
 
 def _period_summary(rows: list[dict[str, Any]], period: str) -> list[dict[str, Any]]:
     grouped: dict[str, list[float]] = defaultdict(list)
-    for row in rows:
-        close_ts = row.get("close_ts")
+    for index, row in enumerate(rows):
+        if "close_ts" not in row:
+            raise RuntimeError(
+                "Signal outcome contract violation: "
+                f"row[{index}] missing required key 'close_ts'"
+            )
+        close_ts = row["close_ts"]
         if close_ts is None:
-            continue
+            raise RuntimeError(
+                "Signal outcome contract violation: "
+                f"row[{index}] has null close_ts for closed outcome "
+                f"(signal_id={row.get('signal_id')})"
+            )
         ts = ensure_utc_timestamp(str(close_ts))
         if period == "daily":
             label = ts.strftime("%Y-%m-%d")
@@ -372,3 +381,35 @@ def _record_to_position(row: dict[str, Any]) -> PositionEvent:
 def _in_range(value: Any, start: pd.Timestamp, end: pd.Timestamp) -> bool:
     ts = ensure_utc_timestamp(value if isinstance(value, pd.Timestamp) else str(value))
     return bool(start <= ts <= end)
+
+
+def _require_signal_strike(
+    signal: SignalEvent,
+    strike_lookup: dict[str, StrikeEvent],
+) -> StrikeEvent:
+    strike = strike_lookup.get(signal.strike_id)
+    if strike is None:
+        raise RuntimeError(
+            "Signal-to-strike link violation: "
+            f"signal_id={signal.id} references missing strike_id={signal.strike_id}"
+        )
+    return strike
+
+
+def _require_breakdown_label(
+    row: dict[str, Any],
+    key: str,
+    index: int,
+) -> str:
+    if key not in row:
+        raise RuntimeError(
+            "Summary breakdown contract violation: "
+            f"row[{index}] missing required key '{key}'"
+        )
+    value = row[key]
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(
+            "Summary breakdown contract violation: "
+            f"row[{index}] key '{key}' must be non-empty string, got {value!r}"
+        )
+    return value

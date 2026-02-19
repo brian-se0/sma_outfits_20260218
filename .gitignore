@@ -36,7 +36,7 @@ logs/
 
 # Generated artifacts and local data
 artifacts/
-data/
+/data/
 *.parquet
 *.feather
 *.arrow

@@ -38,14 +38,17 @@ class RiskManager:
         partial_take_r: float = 1.0,
         final_take_r: float = 3.0,
         timeout_bars: int = 120,
-        migrations: dict[str, Any] | None = None,
+        *,
+        migrations: dict[str, Any],
     ) -> None:
         self.long_break = long_break
         self.short_break = short_break
         self.partial_take_r = partial_take_r
         self.final_take_r = final_take_r
         self.timeout_bars = timeout_bars
-        self.migrations = migrations or {}
+        if not isinstance(migrations, dict):
+            raise TypeError("migrations must be an explicit dict")
+        self.migrations = migrations
 
     def open_position(
         self,
@@ -66,19 +69,34 @@ class RiskManager:
         self,
         position: ManagedPosition,
         bar: BarEvent,
-        proxy_prices: dict[str, float] | None = None,
+        proxy_prices: dict[str, float],
     ) -> list[PositionEvent]:
         if position.closed:
             return []
+        if not isinstance(proxy_prices, dict):
+            raise TypeError("proxy_prices must be an explicit dict")
 
         events: list[PositionEvent] = []
-        proxy_prices = proxy_prices or {}
         migration = self.migrations.get(position.symbol)
-        if migration:
-            proxy_symbol = migration.get("proxy_symbol")
+        if migration is not None:
+            if not isinstance(migration, dict):
+                raise RuntimeError(
+                    f"Invalid risk migration config for {position.symbol}: expected map"
+                )
+            missing_keys = {"proxy_symbol", "break_level", "mode"}.difference(migration.keys())
+            if missing_keys:
+                raise RuntimeError(
+                    "Invalid risk migration config for "
+                    f"{position.symbol}: missing keys {sorted(missing_keys)}"
+                )
+            proxy_symbol = str(migration["proxy_symbol"])
             if proxy_symbol in proxy_prices:
-                level = float(migration.get("break_level"))
-                mode = str(migration.get("mode", "below"))
+                level = float(migration["break_level"])
+                mode = str(migration["mode"])
+                if mode not in {"below", "above"}:
+                    raise RuntimeError(
+                        f"Invalid risk migration mode for {position.symbol}: {mode}"
+                    )
                 proxy_price = proxy_prices[proxy_symbol]
                 breached = proxy_price <= level if mode == "below" else proxy_price >= level
                 if breached:

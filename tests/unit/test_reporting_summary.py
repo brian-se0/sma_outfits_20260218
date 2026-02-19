@@ -3,9 +3,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pandas as pd
+import pytest
 
 from sma_outfits.events import PositionEvent, SignalEvent, StrikeEvent, event_to_record
-from sma_outfits.reporting.summary import build_summary, build_summary_from_records
+from sma_outfits.reporting.summary import (
+    _r_breakdown,
+    _rate_breakdown,
+    build_summary,
+    build_summary_from_records,
+)
 
 
 def test_build_summary_includes_r_outcomes_and_breakdowns() -> None:
@@ -150,3 +156,26 @@ def test_build_summary_from_records_applies_time_range() -> None:
 
     assert summary["closed_positions"] == 1
     assert summary["hit_rate"] == 1.0
+
+
+def test_build_summary_fails_when_signal_references_missing_strike() -> None:
+    signal = SignalEvent(
+        id="signal-missing",
+        strike_id="strike-missing",
+        side="LONG",
+        signal_type="precision_buy",
+        entry=100.0,
+        stop=99.0,
+        confidence="HIGH",
+        session_type="regular",
+    )
+
+    with pytest.raises(RuntimeError, match="missing strike_id"):
+        build_summary(strikes=[], signals=[signal], position_events=[])
+
+
+def test_breakdown_fails_when_label_key_missing() -> None:
+    with pytest.raises(RuntimeError, match="missing required key 'signal_type'"):
+        _rate_breakdown(rows=[{"realized_r": 1.0}], key="signal_type")
+    with pytest.raises(RuntimeError, match="missing required key 'signal_type'"):
+        _r_breakdown(rows=[{"realized_r": 1.0}], key="signal_type")

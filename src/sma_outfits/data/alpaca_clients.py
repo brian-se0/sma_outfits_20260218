@@ -56,6 +56,15 @@ class StreamDisconnectedError(LiveStreamError):
     pass
 
 
+REQUIRED_REST_BAR_KEYS = frozenset({"t", "o", "h", "l", "c", "v"})
+OPTIONAL_REST_BAR_KEYS = frozenset({"n", "vw"})
+ALLOWED_REST_BAR_KEYS = REQUIRED_REST_BAR_KEYS | OPTIONAL_REST_BAR_KEYS
+
+REQUIRED_WS_BAR_KEYS = frozenset({"T", "S", "t", "o", "h", "l", "c", "v"})
+OPTIONAL_WS_BAR_KEYS = frozenset({"n", "vw"})
+ALLOWED_WS_BAR_KEYS = REQUIRED_WS_BAR_KEYS | OPTIONAL_WS_BAR_KEYS
+
+
 @dataclass(slots=True)
 class AlpacaRESTClient:
     config: AlpacaConfig
@@ -108,19 +117,16 @@ class AlpacaRESTClient:
         rows: list[dict] = []
         while True:
             payload = self._get_json(endpoint, params)
-            bars_data = payload.get("bars", {})
-            if isinstance(bars_data, dict):
-                next_rows = bars_data.get(symbol, [])
-            else:
-                next_rows = bars_data
-            rows.extend(next_rows)
-            token = payload.get("next_page_token")
+            rows.extend(_extract_rest_symbol_rows(payload, endpoint=endpoint, symbol=symbol))
+            token = _extract_next_page_token(payload, endpoint=endpoint)
             if not token:
                 break
             params["page_token"] = token
         if not rows:
             raise RuntimeError(f"No Alpaca bars returned for {symbol} ({native_tf})")
-        return ensure_ohlcv_schema(_rows_to_dataframe(rows))
+        return ensure_ohlcv_schema(
+            _rows_to_dataframe(rows, endpoint=endpoint, symbol=symbol)
+        )
 
     def _fetch_crypto_bars(
         self,
@@ -140,19 +146,16 @@ class AlpacaRESTClient:
         rows: list[dict] = []
         while True:
             payload = self._get_json(endpoint, params)
-            bars_data = payload.get("bars", {})
-            if isinstance(bars_data, dict):
-                next_rows = bars_data.get(symbol, [])
-            else:
-                next_rows = bars_data
-            rows.extend(next_rows)
-            token = payload.get("next_page_token")
+            rows.extend(_extract_rest_symbol_rows(payload, endpoint=endpoint, symbol=symbol))
+            token = _extract_next_page_token(payload, endpoint=endpoint)
             if not token:
                 break
             params["page_token"] = token
         if not rows:
             raise RuntimeError(f"No Alpaca crypto bars returned for {symbol} ({native_tf})")
-        return ensure_ohlcv_schema(_rows_to_dataframe(rows))
+        return ensure_ohlcv_schema(
+            _rows_to_dataframe(rows, endpoint=endpoint, symbol=symbol)
+        )
 
     def _get_json(self, endpoint: str, params: dict[str, str | int]) -> dict:
         response = self._session.get(
@@ -260,12 +263,14 @@ class AlpacaWebSocketBarStream:
         while monotonic() < deadline:
             raw_message = await asyncio.wait_for(websocket.recv(), timeout=10.0)
             for row in self._decode_payload(raw_message):
-                msg_type = str(row.get("T", ""))
-                msg_value = str(row.get("msg", "")).lower()
+                msg_type = _require_ws_message_type(row, phase="auth")
                 if msg_type == "error":
                     raise LiveStreamError(f"Alpaca auth failed: {row}")
-                if msg_type == "success" and msg_value == "authenticated":
-                    return
+                if msg_type == "success":
+                    msg_value = _require_ws_message_field(row, key="msg", phase="auth")
+                    if str(msg_value).lower() == "authenticated":
+                        return
+                    continue
         raise LiveStreamError("Timed out waiting for Alpaca websocket authentication")
 
     async def _subscribe(self, websocket) -> None:  # noqa: ANN001
@@ -281,28 +286,38 @@ class AlpacaWebSocketBarStream:
         while monotonic() < deadline:
             raw_message = await asyncio.wait_for(websocket.recv(), timeout=10.0)
             for row in self._decode_payload(raw_message):
-                msg_type = str(row.get("T", ""))
+                msg_type = _require_ws_message_type(row, phase="subscribe")
                 if msg_type == "error":
                     raise LiveStreamError(f"Alpaca subscribe failed: {row}")
                 if msg_type == "subscription":
-                    bars = row.get("bars", [])
-                    if isinstance(bars, list) and set(bars) >= set(self.symbols):
+                    bars = _require_ws_message_field(row, key="bars", phase="subscribe")
+                    if not isinstance(bars, list) or any(
+                        not isinstance(symbol, str) for symbol in bars
+                    ):
+                        raise LiveStreamError(
+                            "Invalid websocket subscribe payload: "
+                            f"bars must be a list[str], got {type(bars).__name__}"
+                        )
+                    normalized_bars = {symbol.upper() for symbol in bars}
+                    if normalized_bars >= {symbol.upper() for symbol in self.symbols}:
                         return
         raise LiveStreamError("Timed out waiting for Alpaca websocket subscription")
 
     @staticmethod
-    def _decode_payload(raw_message: str | bytes) -> list[dict]:
+    def _decode_payload(raw_message: str | bytes) -> list[dict[str, object]]:
         decoded = raw_message.decode("utf-8") if isinstance(raw_message, bytes) else raw_message
         payload = json.loads(decoded)
-        if isinstance(payload, dict):
-            payload = [payload]
         if not isinstance(payload, list):
-            raise LiveStreamError(f"Unexpected websocket payload type: {type(payload)}")
-        rows: list[dict] = []
+            raise LiveStreamError(
+                "Unexpected websocket payload container: "
+                f"{type(payload).__name__}; expected list"
+            )
+        rows: list[dict[str, object]] = []
         for row in payload:
             if not isinstance(row, dict):
                 raise LiveStreamError(
-                    f"Unexpected websocket row type: {type(row)} in payload"
+                    "Unexpected websocket row type: "
+                    f"{type(row).__name__}; expected dict"
                 )
             rows.append(row)
         return rows
@@ -350,59 +365,215 @@ class InMemoryHistoricalClient:
         return frame.reset_index(drop=True)
 
 
-def _rows_to_dataframe(rows: list[dict]) -> pd.DataFrame:
-    parsed: list[dict[str, float | str]] = []
-    for row in rows:
+def _rows_to_dataframe(
+    rows: list[dict],
+    endpoint: str,
+    symbol: str,
+) -> pd.DataFrame:
+    parsed: list[dict[str, float | pd.Timestamp]] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise RuntimeError(
+                f"Alpaca REST payload contract violation ({endpoint}, {symbol}): "
+                f"row[{index}] type={type(row).__name__} (expected dict)"
+            )
+        missing = REQUIRED_REST_BAR_KEYS.difference(row.keys())
+        unexpected = set(row.keys()).difference(ALLOWED_REST_BAR_KEYS)
+        if missing or unexpected:
+            raise RuntimeError(
+                f"Alpaca REST payload contract violation ({endpoint}, {symbol}): "
+                f"row[{index}] missing={sorted(missing)} unexpected={sorted(unexpected)}"
+            )
+
         parsed.append(
             {
-                "ts": row.get("t") or row.get("timestamp"),
-                "open": row.get("o") if row.get("o") is not None else row.get("open"),
-                "high": row.get("h") if row.get("h") is not None else row.get("high"),
-                "low": row.get("l") if row.get("l") is not None else row.get("low"),
-                "close": row.get("c") if row.get("c") is not None else row.get("close"),
-                "volume": row.get("v") if row.get("v") is not None else row.get("volume"),
+                "ts": _coerce_utc_timestamp(
+                    row["t"],
+                    context=f"{endpoint} {symbol} row[{index}] field=t",
+                    error_cls=RuntimeError,
+                ),
+                "open": _coerce_float(
+                    row["o"],
+                    context=f"{endpoint} {symbol} row[{index}] field=o",
+                    error_cls=RuntimeError,
+                ),
+                "high": _coerce_float(
+                    row["h"],
+                    context=f"{endpoint} {symbol} row[{index}] field=h",
+                    error_cls=RuntimeError,
+                ),
+                "low": _coerce_float(
+                    row["l"],
+                    context=f"{endpoint} {symbol} row[{index}] field=l",
+                    error_cls=RuntimeError,
+                ),
+                "close": _coerce_float(
+                    row["c"],
+                    context=f"{endpoint} {symbol} row[{index}] field=c",
+                    error_cls=RuntimeError,
+                ),
+                "volume": _coerce_float(
+                    row["v"],
+                    context=f"{endpoint} {symbol} row[{index}] field=v",
+                    error_cls=RuntimeError,
+                ),
             }
         )
     frame = pd.DataFrame(parsed)
     if frame.empty:
         raise RuntimeError("No rows to normalize into DataFrame")
-    frame["ts"] = pd.to_datetime(frame["ts"], utc=True)
     return frame
 
 
-def _parse_live_bar(row: dict, market: str) -> LiveBar | None:
-    event_type = str(row.get("T", ""))
+def _parse_live_bar(row: dict[str, object], market: str) -> LiveBar | None:
+    event_type_raw = row.get("T")
+    if event_type_raw is None:
+        raise LiveStreamError(
+            f"Malformed websocket message for {market}: missing required key 'T'"
+        )
+    event_type = str(event_type_raw)
     if event_type != "b":
         return None
 
-    symbol = row.get("S") or row.get("symbol")
-    ts_value = row.get("t") or row.get("timestamp")
-    if symbol is None or ts_value is None:
-        raise LiveStreamError(f"Malformed live bar payload: {row}")
+    missing = REQUIRED_WS_BAR_KEYS.difference(row.keys())
+    unexpected = set(row.keys()).difference(ALLOWED_WS_BAR_KEYS)
+    if missing or unexpected:
+        raise LiveStreamError(
+            f"Malformed websocket live bar for {market}: "
+            f"missing={sorted(missing)} unexpected={sorted(unexpected)}"
+        )
 
-    open_value = row.get("o") if row.get("o") is not None else row.get("open")
-    high_value = row.get("h") if row.get("h") is not None else row.get("high")
-    low_value = row.get("l") if row.get("l") is not None else row.get("low")
-    close_value = row.get("c") if row.get("c") is not None else row.get("close")
-    volume_value = row.get("v") if row.get("v") is not None else row.get("volume")
-    if any(
-        value is None
-        for value in (open_value, high_value, low_value, close_value, volume_value)
-    ):
-        raise LiveStreamError(f"Incomplete live bar payload: {row}")
+    symbol = str(row["S"]).strip().upper()
+    if not symbol:
+        raise LiveStreamError(f"Malformed websocket live bar for {market}: symbol is empty")
+    ts = _coerce_utc_timestamp(
+        row["t"],
+        context=f"websocket {market} field=t",
+        error_cls=LiveStreamError,
+    )
 
-    ts = pd.Timestamp(ts_value)
-    if ts.tzinfo is None:
-        ts = ts.tz_localize("UTC")
-    else:
-        ts = ts.tz_convert("UTC")
     return LiveBar(
-        symbol=str(symbol).upper(),
+        symbol=symbol,
         ts=ts,
-        open=float(open_value),
-        high=float(high_value),
-        low=float(low_value),
-        close=float(close_value),
-        volume=float(volume_value),
+        open=_coerce_float(
+            row["o"],
+            context=f"websocket {market} field=o",
+            error_cls=LiveStreamError,
+        ),
+        high=_coerce_float(
+            row["h"],
+            context=f"websocket {market} field=h",
+            error_cls=LiveStreamError,
+        ),
+        low=_coerce_float(
+            row["l"],
+            context=f"websocket {market} field=l",
+            error_cls=LiveStreamError,
+        ),
+        close=_coerce_float(
+            row["c"],
+            context=f"websocket {market} field=c",
+            error_cls=LiveStreamError,
+        ),
+        volume=_coerce_float(
+            row["v"],
+            context=f"websocket {market} field=v",
+            error_cls=LiveStreamError,
+        ),
         source=f"alpaca_ws_{market}",
     )
+
+
+def _extract_rest_symbol_rows(
+    payload: dict[str, object],
+    endpoint: str,
+    symbol: str,
+) -> list[dict]:
+    bars_data = payload.get("bars")
+    if not isinstance(bars_data, dict):
+        raise RuntimeError(
+            f"Alpaca REST payload contract violation ({endpoint}, {symbol}): "
+            f"'bars' must be dict[symbol, list], got {type(bars_data).__name__}"
+        )
+    if symbol not in bars_data:
+        raise RuntimeError(
+            f"Alpaca REST payload contract violation ({endpoint}, {symbol}): "
+            f"missing bars entry for symbol. available_keys={sorted(map(str, bars_data.keys()))}"
+        )
+    rows = bars_data[symbol]
+    if not isinstance(rows, list):
+        raise RuntimeError(
+            f"Alpaca REST payload contract violation ({endpoint}, {symbol}): "
+            f"bars[{symbol!r}] type={type(rows).__name__} (expected list)"
+        )
+    return rows
+
+
+def _extract_next_page_token(
+    payload: dict[str, object],
+    endpoint: str,
+) -> str | None:
+    if "next_page_token" not in payload:
+        raise RuntimeError(
+            f"Alpaca REST payload contract violation ({endpoint}): "
+            "missing required key 'next_page_token'"
+        )
+    token = payload["next_page_token"]
+    if token is None:
+        return None
+    if not isinstance(token, str):
+        raise RuntimeError(
+            f"Alpaca REST payload contract violation ({endpoint}): "
+            f"next_page_token type={type(token).__name__} (expected str|null)"
+        )
+    if not token.strip():
+        raise RuntimeError(
+            f"Alpaca REST payload contract violation ({endpoint}): "
+            "next_page_token must be non-empty string when present"
+        )
+    return token
+
+
+def _coerce_utc_timestamp(
+    value: object,
+    context: str,
+    error_cls: type[Exception],
+) -> pd.Timestamp:
+    try:
+        ts = pd.Timestamp(value)
+    except Exception as exc:  # noqa: BLE001
+        raise error_cls(f"{context}: invalid timestamp value={value!r}") from exc
+    if ts.tzinfo is None:
+        return ts.tz_localize("UTC")
+    return ts.tz_convert("UTC")
+
+
+def _coerce_float(
+    value: object,
+    context: str,
+    error_cls: type[Exception],
+) -> float:
+    try:
+        return float(value)
+    except Exception as exc:  # noqa: BLE001
+        raise error_cls(f"{context}: expected numeric value, got {value!r}") from exc
+
+
+def _require_ws_message_type(row: dict[str, object], phase: str) -> str:
+    if "T" not in row:
+        raise LiveStreamError(
+            f"Malformed websocket payload during {phase}: missing required key 'T'"
+        )
+    return str(row["T"])
+
+
+def _require_ws_message_field(
+    row: dict[str, object],
+    key: str,
+    phase: str,
+) -> object:
+    if key not in row:
+        raise LiveStreamError(
+            f"Malformed websocket payload during {phase}: missing required key '{key}'"
+        )
+    return row[key]

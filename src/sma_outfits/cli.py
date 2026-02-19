@@ -13,6 +13,7 @@ from sma_outfits.data.ingest import BackfillResult, backfill_historical
 from sma_outfits.data.storage import StorageManager
 from sma_outfits.live import LiveRunner
 from sma_outfits.monitoring.logging import configure_logging
+from sma_outfits.monitoring.progress import TerminalProgressBar, TerminalStatusLine
 from sma_outfits.reporting.summary import build_summary_from_records, write_summary_report
 from sma_outfits.replay.engine import ReplayEngine
 from sma_outfits.runtime import assert_python_runtime
@@ -63,6 +64,11 @@ def backfill(
     start: str = typer.Option(..., "--start", help="UTC start timestamp"),
     end: str = typer.Option(..., "--end", help="UTC end timestamp"),
     timeframes: str = typer.Option("", "--timeframes", help="CSV timeframes override"),
+    progress: bool = typer.Option(
+        True,
+        "--progress/--no-progress",
+        help="Show terminal progress bar",
+    ),
 ) -> None:
     assert_python_runtime()
     settings = _load_runtime_settings(config)
@@ -74,6 +80,18 @@ def backfill(
 
     client = AlpacaRESTClient(settings.alpaca)
     storage = StorageManager(Path(settings.storage_root))
+    progress_bar = TerminalProgressBar(
+        total=max(1, len(selected_symbols) * len(selected_timeframes)),
+        label="backfill",
+        enabled=progress,
+    )
+
+    def _on_progress(done: int, total: int, row: BackfillResult) -> None:
+        progress_bar.update(
+            done,
+            status=f"{row.symbol}/{row.timeframe} written={row.bars_written}",
+        )
+
     results = backfill_historical(
         settings=settings,
         symbols=selected_symbols,
@@ -82,7 +100,9 @@ def backfill(
         end=end_ts,
         client=client,
         storage=storage,
+        progress_callback=_on_progress if progress else None,
     )
+    progress_bar.close()
     typer.echo(_format_backfill_results(results))
 
 
@@ -99,13 +119,45 @@ def run_live(
         "--runtime-minutes",
         help="Optional run length. When omitted, uses config live.runtime_minutes.",
     ),
+    progress: bool = typer.Option(
+        True,
+        "--progress/--no-progress",
+        help="Show live status line in terminal",
+    ),
 ) -> None:
     assert_python_runtime()
     settings = _load_runtime_settings(config)
     configure_logging()
     storage = StorageManager(Path(settings.storage_root))
     runner = LiveRunner(settings=settings, storage=storage)
+    status_line = TerminalStatusLine(label="run-live", enabled=progress)
     warmup_minutes = lookback_hours * 60 if lookback_hours is not None else None
+    result = None
+
+    def _on_live_progress(payload: dict[str, object]) -> None:
+        try:
+            status = str(payload["status"])
+            bars_received = int(payload["bars_received"])
+            bars_processed = int(payload["bars_processed"])
+            duplicate_bars_skipped = int(payload["duplicate_bars_skipped"])
+            reconnects = int(payload["reconnects"])
+            stale_reconnects = int(payload["stale_feed_reconnects"])
+            heartbeat_failures = int(payload["heartbeat_failures"])
+            uptime_seconds = float(payload["uptime_seconds"])
+        except KeyError as exc:
+            raise RuntimeError(
+                f"Live progress payload contract violation: missing key {exc.args[0]!r}"
+            ) from exc
+        status_line.update(
+            (
+                f"status={status} recv={bars_received} proc={bars_processed} "
+                f"dup={duplicate_bars_skipped} reconn={reconnects} "
+                f"stale={stale_reconnects} hb={heartbeat_failures} "
+                f"up={uptime_seconds:.0f}s"
+            ),
+            force=status != "running",
+        )
+
     try:
         result = asyncio.run(
             runner.run(
@@ -113,11 +165,15 @@ def run_live(
                 timeframes=settings.timeframes.live,
                 runtime_minutes=runtime_minutes,
                 warmup_minutes=warmup_minutes,
+                progress_callback=_on_live_progress if progress else None,
             )
         )
     except KeyboardInterrupt:
         raise typer.Exit(code=130) from None
+    finally:
+        status_line.close()
 
+    assert result is not None
     payload = dict(result.summary)
     payload.update(
         {
@@ -141,6 +197,11 @@ def replay(
     end: str = typer.Option(..., "--end"),
     symbols: str = typer.Option("", "--symbols"),
     timeframes: str = typer.Option("", "--timeframes"),
+    progress: bool = typer.Option(
+        True,
+        "--progress/--no-progress",
+        help="Show terminal progress bar",
+    ),
 ) -> None:
     assert_python_runtime()
     settings = _load_runtime_settings(config)
@@ -151,12 +212,36 @@ def replay(
     end_ts = ensure_utc_timestamp(end)
     storage = StorageManager(Path(settings.storage_root))
     replay_engine = ReplayEngine(settings=settings, storage=storage)
+    progress_bar: TerminalProgressBar | None = None
+
+    def _on_progress(
+        done: int,
+        total: int,
+        symbol: str,
+        timeframe: str,
+        ts: pd.Timestamp,
+    ) -> None:
+        nonlocal progress_bar
+        if progress_bar is None:
+            progress_bar = TerminalProgressBar(
+                total=max(1, total),
+                label="replay",
+                enabled=progress,
+            )
+        progress_bar.update(
+            done,
+            status=f"{symbol}/{timeframe} {pd.Timestamp(ts).strftime('%H:%M:%S')}",
+        )
+
     result = replay_engine.run(
         start=start_ts,
         end=end_ts,
         symbols=selected_symbols,
         timeframes=selected_timeframes,
+        progress_callback=_on_progress if progress else None,
     )
+    if progress_bar is not None:
+        progress_bar.close()
     label = f"{start_ts.strftime('%Y%m%dT%H%M%S')}_{end_ts.strftime('%Y%m%dT%H%M%S')}"
     report_root = Path(settings.archive.root) / "reports"
     markdown_path, csv_path = write_summary_report(result.summary, report_root, label)

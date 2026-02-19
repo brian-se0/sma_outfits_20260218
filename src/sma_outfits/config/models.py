@@ -317,9 +317,11 @@ def load_settings(
         alpaca_data[config_key] = env_value
     parsed["alpaca"] = alpaca_data
 
-    sessions = dict(parsed.get("sessions", {}))
-    if "timezone" not in sessions and env.get("APP_TIMEZONE"):
-        sessions["timezone"] = env["APP_TIMEZONE"]
-    parsed["sessions"] = sessions
+    sessions = parsed.get("sessions", {})
+    if sessions is None:
+        sessions = {}
+    if not isinstance(sessions, dict):
+        raise ValueError("sessions section must be a map")
+    parsed["sessions"] = dict(sessions)
 
     return Settings.model_validate(parsed)

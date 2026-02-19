@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pandas as pd
+import pytest
 
 from sma_outfits.events import BarEvent, SMAState
 from sma_outfits.signals.classifier import SignalClassifier
-from sma_outfits.signals.detector import OutfitDefinition, StrikeDetector
+from sma_outfits.signals.detector import OutfitDefinition, StrikeDetector, load_outfits
 
 
 def _bar(close: float, low: float, high: float, minute: int) -> BarEvent:
@@ -73,3 +74,45 @@ def test_side_assignment_long_and_short() -> None:
     short_state = {20: SMAState("SPY", "1m", 20, 99.5, short_bar.ts)}
     _, signals = detector.detect(short_bar, short_state, history)
     assert signals[0].side == "SHORT"
+
+
+def test_load_outfits_rejects_missing_required_keys(tmp_path) -> None:
+    path = tmp_path / "outfits.yaml"
+    path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: test",
+                "    periods: [10, 20]",
+                "    source_configuration: test",
+                "    source_ambiguous: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="missing required keys"):
+        load_outfits(path)
+
+
+def test_load_outfits_accepts_complete_ambiguous_row(tmp_path) -> None:
+    path = tmp_path / "outfits.yaml"
+    path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: test",
+                "    periods: [10, 20]",
+                "    description: ambiguous but complete",
+                "    source_configuration: test",
+                "    source_ambiguous: true",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    outfits = load_outfits(path)
+    assert len(outfits) == 1
+    assert outfits[0].source_ambiguous is True

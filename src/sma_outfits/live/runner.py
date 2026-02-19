@@ -5,11 +5,11 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic
 from typing import Any, AsyncIterator, Callable
 
 import pandas as pd
 
-from sma_outfits.archive.charts import write_signal_chart
 from sma_outfits.archive.thread_writer import append_thread_markdown
 from sma_outfits.config.models import Settings
 from sma_outfits.data.alpaca_clients import (
@@ -39,6 +39,7 @@ from sma_outfits.signals.detector import StrikeDetector, load_outfits
 from sma_outfits.utils import is_crypto_symbol, is_regular_session
 
 LiveStreamFactory = Callable[[str, list[str]], AsyncIterator[LiveBar]]
+LiveProgressCallback = Callable[[dict[str, Any]], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,9 +71,6 @@ class LiveRunner:
 
         outfits_path = self._resolve_outfits_path(settings.outfits_path)
         self._outfits = load_outfits(outfits_path)
-        self._outfit_periods = {
-            outfit.outfit_id: list(outfit.periods) for outfit in self._outfits
-        }
         self._init_pipeline_components()
 
         self._lock = asyncio.Lock()
@@ -86,11 +84,14 @@ class LiveRunner:
         runtime_minutes: int | None = None,
         runtime_seconds: float | None = None,
         warmup_minutes: int | None = None,
+        progress_callback: LiveProgressCallback | None = None,
     ) -> LiveRunResult:
         self._reset_state()
         self._stop_event.clear()
         self._init_pipeline_components()
+        self._progress_callback = progress_callback
         self._started_at = datetime.now(timezone.utc)
+        self._emit_progress(force=True, status="starting")
 
         selected_symbols = symbols or self.settings.universe.symbols
         selected_timeframes = timeframes or self.settings.timeframes.live
@@ -168,6 +169,7 @@ class LiveRunner:
             position_events=self._position_events,
         )
         ended_at = datetime.now(timezone.utc)
+        self._emit_progress(force=True, status="completed")
         return LiveRunResult(
             summary=summary,
             bars_received=self._bars_received,
@@ -228,6 +230,10 @@ class LiveRunner:
                     attempts,
                     exc,
                 )
+                self._emit_progress(
+                    force=True,
+                    status=f"{market}:reconnect_attempt={attempts}",
+                )
                 await asyncio.sleep(delay)
             except Exception as exc:
                 raise RuntimeError(f"Fatal error in {market} live stream: {exc}") from exc
@@ -284,6 +290,7 @@ class LiveRunner:
                     source=live_bar.source,
                     persist_bar=timeframe != "1m",
                 )
+            self._emit_progress()
 
     def _append_source_bar(self, symbol: str, live_bar: LiveBar) -> bool:
         frame = self._source_1m_by_symbol.get(symbol)
@@ -315,27 +322,17 @@ class LiveRunner:
                     f"{live_bar.ts.isoformat()} < {last_ts.isoformat()}"
                 )
 
-        appended = pd.concat(
-            [
-                frame,
-                pd.DataFrame(
-                    [
-                        {
-                            "ts": live_bar.ts,
-                            "open": live_bar.open,
-                            "high": live_bar.high,
-                            "low": live_bar.low,
-                            "close": live_bar.close,
-                            "volume": live_bar.volume,
-                        }
-                    ]
-                ),
-            ],
-            ignore_index=True,
-        )
-        appended["ts"] = pd.to_datetime(appended["ts"], utc=True)
-        appended = appended.sort_values("ts").reset_index(drop=True)
-        self._source_1m_by_symbol[symbol] = appended
+        frame.loc[len(frame)] = {
+            "ts": live_bar.ts,
+            "open": live_bar.open,
+            "high": live_bar.high,
+            "low": live_bar.low,
+            "close": live_bar.close,
+            "volume": live_bar.volume,
+        }
+        if len(frame) > self._source_window:
+            frame = frame.iloc[-self._source_window :].reset_index(drop=True)
+        self._source_1m_by_symbol[symbol] = frame
         self._proxy_prices[symbol] = live_bar.close
         return True
 
@@ -412,33 +409,15 @@ class LiveRunner:
             )
 
         key = (symbol, timeframe)
-        history = self._history_by_key.get(key)
-        if history is None:
-            history = _empty_bar_frame()
-        history = pd.concat(
-            [
-                history,
-                pd.DataFrame(
-                    [
-                        {
-                            "ts": ts,
-                            "open": open_,
-                            "high": high,
-                            "low": low,
-                            "close": close,
-                            "volume": volume,
-                        }
-                    ]
-                ),
-            ],
-            ignore_index=True,
+        history = self._append_history(
+            key=key,
+            ts=ts,
+            open_=open_,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
         )
-        history["ts"] = pd.to_datetime(history["ts"], utc=True)
-        history = history.sort_values("ts").drop_duplicates(subset=["ts"])
-        if len(history) > 5000:
-            history = history.iloc[-5000:].reset_index(drop=True)
-        else:
-            history = history.reset_index(drop=True)
         self._history_by_key[key] = history
 
         bar = BarEvent(
@@ -476,13 +455,7 @@ class LiveRunner:
         archive_records: list[ArchiveRecord] = []
         for strike, signal in zip(new_strikes, new_signals, strict=True):
             if self.settings.archive.enabled:
-                archive_records.append(
-                    self._archive_signal(
-                        bars=history.tail(250).copy(),
-                        strike=strike,
-                        signal=signal,
-                    )
-                )
+                archive_records.append(self._archive_signal(strike=strike, signal=signal))
 
         position_events: list[PositionEvent] = []
         next_positions: list[ManagedPosition] = []
@@ -525,6 +498,45 @@ class LiveRunner:
         if unique_records:
             self.storage.append_events(name, unique_records)
 
+    def _append_history(
+        self,
+        key: tuple[str, str],
+        ts: pd.Timestamp,
+        open_: float,
+        high: float,
+        low: float,
+        close: float,
+        volume: float,
+    ) -> pd.DataFrame:
+        history = self._history_by_key.get(key)
+        if history is None:
+            history = _empty_bar_frame()
+
+        ts_utc = _to_utc_timestamp(ts)
+        if not history.empty:
+            last_ts = _to_utc_timestamp(history.iloc[-1]["ts"])
+            if ts_utc <= last_ts:
+                if ts_utc == last_ts:
+                    raise RuntimeError(
+                        f"Duplicate strategy bar for {key[0]}/{key[1]} at {ts_utc.isoformat()}"
+                    )
+                raise RuntimeError(
+                    f"Non-monotonic strategy bar for {key[0]}/{key[1]}: "
+                    f"{ts_utc.isoformat()} < {last_ts.isoformat()}"
+                )
+
+        history.loc[len(history)] = {
+            "ts": ts_utc,
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        }
+        if len(history) > self._history_window:
+            history = history.iloc[-self._history_window :].reset_index(drop=True)
+        return history
+
     def _write_bar(
         self,
         symbol: str,
@@ -557,25 +569,14 @@ class LiveRunner:
 
     def _archive_signal(
         self,
-        bars: pd.DataFrame,
         strike: StrikeEvent,
         signal: SignalEvent,
     ) -> ArchiveRecord:
         archive_root = Path(self.settings.archive.root)
-        chart_path = archive_root / "charts" / f"{signal.id}.png"
-        outfit_periods = self._outfit_periods.get(strike.outfit_id, [strike.period])
-        write_signal_chart(
-            bars=bars,
-            strike=strike,
-            signal=signal,
-            outfit_periods=outfit_periods,
-            output_path=chart_path,
-        )
         markdown_path = append_thread_markdown(
             root=archive_root / "threads",
             strike=strike,
             signal=signal,
-            chart_path=chart_path,
         )
         caption = (
             f"{strike.symbol} {strike.timeframe} {signal.signal_type} at {strike.sma_value:.2f} "
@@ -583,8 +584,8 @@ class LiveRunner:
         )
         return ArchiveRecord(
             signal_id=signal.id,
-            chart_path=str(chart_path),
             markdown_path=str(markdown_path),
+            artifact_type="thread_markdown",
             caption=caption,
             ts=strike.bar_ts,
         )
@@ -671,33 +672,15 @@ class LiveRunner:
         volume: float,
     ) -> None:
         key = (symbol, timeframe)
-        history = self._history_by_key.get(key)
-        if history is None:
-            history = _empty_bar_frame()
-        history = pd.concat(
-            [
-                history,
-                pd.DataFrame(
-                    [
-                        {
-                            "ts": ts,
-                            "open": open_,
-                            "high": high,
-                            "low": low,
-                            "close": close,
-                            "volume": volume,
-                        }
-                    ]
-                ),
-            ],
-            ignore_index=True,
+        history = self._append_history(
+            key=key,
+            ts=ts,
+            open_=open_,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
         )
-        history["ts"] = pd.to_datetime(history["ts"], utc=True)
-        history = history.sort_values("ts").drop_duplicates(subset=["ts"])
-        if len(history) > 5000:
-            history = history.iloc[-5000:].reset_index(drop=True)
-        else:
-            history = history.reset_index(drop=True)
         self._history_by_key[key] = history
         self._sma_engine.update(
             symbol=symbol,
@@ -731,15 +714,17 @@ class LiveRunner:
     @staticmethod
     def _resolve_outfits_path(outfits_path: str) -> Path:
         candidate = Path(outfits_path)
-        if candidate.exists():
-            return candidate
-        package_default = Path(__file__).resolve().parents[1] / "config" / "outfits.yaml"
-        if package_default.exists():
-            return package_default
-        raise FileNotFoundError(
-            "Unable to resolve outfits catalog. Checked: "
-            f"{candidate} and {package_default}"
-        )
+        if not candidate.exists():
+            raise FileNotFoundError(
+                "Configured outfits catalog path does not exist: "
+                f"{candidate}"
+            )
+        if not candidate.is_file():
+            raise FileNotFoundError(
+                "Configured outfits catalog path is not a file: "
+                f"{candidate}"
+            )
+        return candidate
 
     def _reset_state(self) -> None:
         self._source_1m_by_symbol: dict[str, pd.DataFrame] = {}
@@ -766,6 +751,30 @@ class LiveRunner:
         self._stale_feed_reconnects = 0
         self._heartbeat_failures = 0
         self._started_at = datetime.now(timezone.utc)
+        self._progress_callback: LiveProgressCallback | None = None
+        self._last_progress_emit = 0.0
+
+    def _emit_progress(self, force: bool = False, status: str | None = None) -> None:
+        if self._progress_callback is None:
+            return
+        now = monotonic()
+        if not force and (now - self._last_progress_emit) < 1.0:
+            return
+        self._last_progress_emit = now
+        payload: dict[str, Any] = {
+            "status": status if status is not None else "running",
+            "bars_received": self._bars_received,
+            "bars_processed": self._bars_processed,
+            "duplicate_bars_skipped": self._duplicate_bars_skipped,
+            "reconnects": self._reconnects,
+            "stale_feed_reconnects": self._stale_feed_reconnects,
+            "heartbeat_failures": self._heartbeat_failures,
+            "uptime_seconds": max(
+                0.0,
+                (datetime.now(timezone.utc) - self._started_at).total_seconds(),
+            ),
+        }
+        self._progress_callback(payload)
 
     def _init_pipeline_components(self) -> None:
         periods = sorted({period for outfit in self._outfits for period in outfit.periods})
@@ -773,6 +782,12 @@ class LiveRunner:
         classifier = SignalClassifier(
             volatility_threshold=self.settings.signal.volatility_percentile_threshold
         )
+        required_history = max(
+            classifier.drawdown_window + 1,
+            classifier.atr_window + classifier.volatility_window - 1,
+        )
+        self._history_window = max(64, required_history + 8)
+        self._source_window = max(10_000, self._history_window * 16)
         self._detector = StrikeDetector(
             outfits=self._outfits,
             tolerance=self.settings.signal.tolerance,
@@ -796,6 +811,13 @@ class LiveRunner:
 
 def _empty_bar_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
+
+
+def _to_utc_timestamp(value: object) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        return ts.tz_localize("UTC")
+    return ts.tz_convert("UTC")
 
 
 def _bar_matches(

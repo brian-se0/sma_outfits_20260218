@@ -1,0 +1,332 @@
+powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $env:TEMP='D:/sma_outfits_20260218\\.tmp'; $env:TMP='D:/sma_outfits_20260218\\.tmp'; if (!(Test-Path '.venv\Scripts\python.exe')) { py -3.14 -m venv .venv }; if (!(Test-Path '.venv\\Scripts\\pip.exe')) { & '.venv\Scripts\python.exe' -m ensurepip --upgrade --default-pip }"
+.venv\Scripts\python.exe -c "import sys; assert sys.version_info[:3] == (3, 14, 3), f'Python 3.14.3 required, got {sys.version.split()[0]}'"
+powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $env:TEMP='D:/sma_outfits_20260218\\.tmp'; $env:TMP='D:/sma_outfits_20260218\\.tmp'; & '.venv\Scripts\python.exe' -m pip install --upgrade pip; & '.venv\Scripts\python.exe' -m pip install -e .[dev]"
+Requirement already satisfied: pip in .\.venv\Lib\site-packages (26.0.1)
+Obtaining file:///D:/sma_outfits_20260218
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Getting requirements to build editable: started
+  Getting requirements to build editable: finished with status 'done'
+  Installing backend dependencies: started
+  Installing backend dependencies: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Requirement already satisfied: duckdb>=1.1.3 in .\.venv\Lib\site-packages (from sma-outfits==0.1.0) (1.4.4)
+Requirement already satisfied: numpy>=2.2.2 in .\.venv\Lib\site-packages (from sma-outfits==0.1.0) (2.4.2)
+Requirement already satisfied: pandas>=2.2.3 in .\.venv\Lib\site-packages (from sma-outfits==0.1.0) (3.0.1)
+Requirement already satisfied: pyarrow>=19.0.0 in .\.venv\Lib\site-packages (from sma-outfits==0.1.0) (23.0.1)
+Requirement already satisfied: pydantic>=2.10.0 in .\.venv\Lib\site-packages (from sma-outfits==0.1.0) (2.12.5)
+Requirement already satisfied: pyyaml>=6.0.2 in .\.venv\Lib\site-packages (from sma-outfits==0.1.0) (6.0.3)
+Requirement already satisfied: requests>=2.32.3 in .\.venv\Lib\site-packages (from sma-outfits==0.1.0) (2.32.5)
+Requirement already satisfied: typer>=0.12.5 in .\.venv\Lib\site-packages (from sma-outfits==0.1.0) (0.24.0)
+Requirement already satisfied: websockets>=15.0.1 in .\.venv\Lib\site-packages (from sma-outfits==0.1.0) (16.0)
+Requirement already satisfied: pytest>=8.3.4 in .\.venv\Lib\site-packages (from sma-outfits==0.1.0) (9.0.2)
+Requirement already satisfied: python-dateutil>=2.8.2 in .\.venv\Lib\site-packages (from pandas>=2.2.3->sma-outfits==0.1.0) (2.9.0.post0)
+Requirement already satisfied: tzdata in .\.venv\Lib\site-packages (from pandas>=2.2.3->sma-outfits==0.1.0) (2025.3)
+Requirement already satisfied: annotated-types>=0.6.0 in .\.venv\Lib\site-packages (from pydantic>=2.10.0->sma-outfits==0.1.0) (0.7.0)
+Requirement already satisfied: pydantic-core==2.41.5 in .\.venv\Lib\site-packages (from pydantic>=2.10.0->sma-outfits==0.1.0) (2.41.5)
+Requirement already satisfied: typing-extensions>=4.14.1 in .\.venv\Lib\site-packages (from pydantic>=2.10.0->sma-outfits==0.1.0) (4.15.0)
+Requirement already satisfied: typing-inspection>=0.4.2 in .\.venv\Lib\site-packages (from pydantic>=2.10.0->sma-outfits==0.1.0) (0.4.2)
+Requirement already satisfied: colorama>=0.4 in .\.venv\Lib\site-packages (from pytest>=8.3.4->sma-outfits==0.1.0) (0.4.6)
+Requirement already satisfied: iniconfig>=1.0.1 in .\.venv\Lib\site-packages (from pytest>=8.3.4->sma-outfits==0.1.0) (2.3.0)
+Requirement already satisfied: packaging>=22 in .\.venv\Lib\site-packages (from pytest>=8.3.4->sma-outfits==0.1.0) (26.0)
+Requirement already satisfied: pluggy<2,>=1.5 in .\.venv\Lib\site-packages (from pytest>=8.3.4->sma-outfits==0.1.0) (1.6.0)
+Requirement already satisfied: pygments>=2.7.2 in .\.venv\Lib\site-packages (from pytest>=8.3.4->sma-outfits==0.1.0) (2.19.2)
+Requirement already satisfied: six>=1.5 in .\.venv\Lib\site-packages (from python-dateutil>=2.8.2->pandas>=2.2.3->sma-outfits==0.1.0) (1.17.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in .\.venv\Lib\site-packages (from requests>=2.32.3->sma-outfits==0.1.0) (3.4.4)
+Requirement already satisfied: idna<4,>=2.5 in .\.venv\Lib\site-packages (from requests>=2.32.3->sma-outfits==0.1.0) (3.11)
+Requirement already satisfied: urllib3<3,>=1.21.1 in .\.venv\Lib\site-packages (from requests>=2.32.3->sma-outfits==0.1.0) (2.6.3)
+Requirement already satisfied: certifi>=2017.4.17 in .\.venv\Lib\site-packages (from requests>=2.32.3->sma-outfits==0.1.0) (2026.1.4)
+Requirement already satisfied: click>=8.2.1 in .\.venv\Lib\site-packages (from typer>=0.12.5->sma-outfits==0.1.0) (8.3.1)
+Requirement already satisfied: shellingham>=1.3.0 in .\.venv\Lib\site-packages (from typer>=0.12.5->sma-outfits==0.1.0) (1.5.4)
+Requirement already satisfied: rich>=12.3.0 in .\.venv\Lib\site-packages (from typer>=0.12.5->sma-outfits==0.1.0) (14.3.2)
+Requirement already satisfied: annotated-doc>=0.0.2 in .\.venv\Lib\site-packages (from typer>=0.12.5->sma-outfits==0.1.0) (0.0.4)
+Requirement already satisfied: markdown-it-py>=2.2.0 in .\.venv\Lib\site-packages (from rich>=12.3.0->typer>=0.12.5->sma-outfits==0.1.0) (4.0.0)
+Requirement already satisfied: mdurl~=0.1 in .\.venv\Lib\site-packages (from markdown-it-py>=2.2.0->rich>=12.3.0->typer>=0.12.5->sma-outfits==0.1.0) (0.1.2)
+Building wheels for collected packages: sma-outfits
+  Building editable for sma-outfits (pyproject.toml): started
+  Building editable for sma-outfits (pyproject.toml): finished with status 'done'
+  Created wheel for sma-outfits: filename=sma_outfits-0.1.0-py3-none-any.whl size=18761 sha256=cb2761e4c9f1ab0c3d25d50bcf34c0c5b8212a157f907804e5f4e69542c53770
+  Stored in directory: D:\sma_outfits_20260218\.tmp\pip-ephem-wheel-cache-wwxmwomj\wheels\31\48\0d\c3779ab26cc2b713161d01a3f02f682bd579c6c883fbebf8f6
+Successfully built sma-outfits
+Installing collected packages: sma-outfits
+  Attempting uninstall: sma-outfits
+    Found existing installation: sma-outfits 0.1.0
+    Uninstalling sma-outfits-0.1.0:
+      Successfully uninstalled sma-outfits-0.1.0
+Successfully installed sma-outfits-0.1.0
+powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.venv' | Out-Null; Set-Content -Path '.venv\.install.stamp' -Value (Get-Date -Format o)"
+.venv\Scripts\python.exe -m sma_outfits.cli validate-config --config configs/settings.example.yaml
+{
+  "status": "ok",
+  "symbols": 23,
+  "timeframes": [
+    "1m",
+    "2m",
+    "3m",
+    "5m",
+    "10m",
+    "15m",
+    "20m",
+    "30m",
+    "1h",
+    "2h",
+    "4h",
+    "1D",
+    "1W",
+    "1M",
+    "1Q"
+  ],
+  "archive_enabled": true
+}
+powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp\\pytest' | Out-Null; $env:TEMP='D:/sma_outfits_20260218\\.tmp'; $env:TMP='D:/sma_outfits_20260218\\.tmp'; & '.venv\Scripts\python.exe' -m pytest"
+.s.................                                                      [100%]
+18 passed, 1 skipped in 248.09s (0:04:08)
+.venv\Scripts\python.exe -m sma_outfits.cli backfill --config configs/settings.example.yaml --symbols SPY --start 2025-01-02T14:30:00Z --end 2025-01-02T15:00:00Z --timeframes 1m
+[
+  {
+    "symbol": "SPY",
+    "timeframe": "1m",
+    "bars_written": 31
+  }
+]
+.venv\Scripts\python.exe -m sma_outfits.cli replay --config configs/settings.example.yaml --start 2025-01-02T14:30:00Z --end 2025-01-02T15:00:00Z
+{
+  "total_strikes": 14,
+  "total_signals": 14,
+  "total_position_events": 14,
+  "closed_positions": 14,
+  "win_rate": 0.0,
+  "hit_rate": 0.0,
+  "top_symbols": [
+    [
+      "SPY",
+      14
+    ]
+  ],
+  "top_outfits": [
+    [
+      "spx_system",
+      4
+    ],
+    [
+      "an_11",
+      4
+    ],
+    [
+      "base2_nvda",
+      2
+    ],
+    [
+      "russia_president_2000",
+      2
+    ],
+    [
+      "time_1440_ambiguous",
+      2
+    ]
+  ],
+  "close_reason_breakdown": [
+    [
+      "singular_point_hard_stop",
+      14
+    ]
+  ],
+  "hit_rate_by_signal_type": [
+    {
+      "label": "precision_buy",
+      "count": 10,
+      "hits": 0,
+      "hit_rate": 0.0
+    },
+    {
+      "label": "automated_short",
+      "count": 4,
+      "hits": 0,
+      "hit_rate": 0.0
+    }
+  ],
+  "hit_rate_by_side": [
+    {
+      "label": "LONG",
+      "count": 10,
+      "hits": 0,
+      "hit_rate": 0.0
+    },
+    {
+      "label": "SHORT",
+      "count": 4,
+      "hits": 0,
+      "hit_rate": 0.0
+    }
+  ],
+  "r_by_signal_type": [
+    {
+      "label": "precision_buy",
+      "count": 10,
+      "avg_r": -1.0,
+      "total_r": -10.0
+    },
+    {
+      "label": "automated_short",
+      "count": 4,
+      "avg_r": -1.0,
+      "total_r": -4.0
+    }
+  ],
+  "r_outcome": {
+    "total_realized_r": -14.0,
+    "avg_realized_r": -1.0,
+    "median_realized_r": -1.0,
+    "min_realized_r": -1.0,
+    "max_realized_r": -1.0,
+    "bucket_counts": {
+      "<=-1R": 14,
+      "-1R_to_0R": 0,
+      "0R_to_1R": 0,
+      "1R_to_3R": 0,
+      ">=3R": 0
+    }
+  },
+  "period_summary_daily": [
+    {
+      "period": "2025-01-02",
+      "closed_positions": 14,
+      "hit_rate": 0.0,
+      "avg_r": -1.0,
+      "total_r": -14.0
+    }
+  ],
+  "period_summary_monthly": [
+    {
+      "period": "2025-01",
+      "closed_positions": 14,
+      "hit_rate": 0.0,
+      "avg_r": -1.0,
+      "total_r": -14.0
+    }
+  ]
+}
+report_markdown=artifacts\reports\20250102T143000_20250102T150000.md
+report_csv=artifacts\reports\20250102T143000_20250102T150000.csv
+.venv\Scripts\python.exe -m sma_outfits.cli report --config configs/settings.example.yaml
+{
+  "total_strikes": 14,
+  "total_signals": 14,
+  "total_position_events": 14,
+  "closed_positions": 14,
+  "win_rate": 0.0,
+  "hit_rate": 0.0,
+  "top_symbols": [
+    [
+      "SPY",
+      14
+    ]
+  ],
+  "top_outfits": [
+    [
+      "spx_system",
+      4
+    ],
+    [
+      "an_11",
+      4
+    ],
+    [
+      "base2_nvda",
+      2
+    ],
+    [
+      "russia_president_2000",
+      2
+    ],
+    [
+      "time_1440_ambiguous",
+      2
+    ]
+  ],
+  "close_reason_breakdown": [
+    [
+      "singular_point_hard_stop",
+      14
+    ]
+  ],
+  "hit_rate_by_signal_type": [
+    {
+      "label": "precision_buy",
+      "count": 10,
+      "hits": 0,
+      "hit_rate": 0.0
+    },
+    {
+      "label": "automated_short",
+      "count": 4,
+      "hits": 0,
+      "hit_rate": 0.0
+    }
+  ],
+  "hit_rate_by_side": [
+    {
+      "label": "LONG",
+      "count": 10,
+      "hits": 0,
+      "hit_rate": 0.0
+    },
+    {
+      "label": "SHORT",
+      "count": 4,
+      "hits": 0,
+      "hit_rate": 0.0
+    }
+  ],
+  "r_by_signal_type": [
+    {
+      "label": "precision_buy",
+      "count": 10,
+      "avg_r": -1.0,
+      "total_r": -10.0
+    },
+    {
+      "label": "automated_short",
+      "count": 4,
+      "avg_r": -1.0,
+      "total_r": -4.0
+    }
+  ],
+  "r_outcome": {
+    "total_realized_r": -14.0,
+    "avg_realized_r": -1.0,
+    "median_realized_r": -1.0,
+    "min_realized_r": -1.0,
+    "max_realized_r": -1.0,
+    "bucket_counts": {
+      "<=-1R": 14,
+      "-1R_to_0R": 0,
+      "0R_to_1R": 0,
+      "1R_to_3R": 0,
+      ">=3R": 0
+    }
+  },
+  "period_summary_daily": [
+    {
+      "period": "2025-01-02",
+      "closed_positions": 14,
+      "hit_rate": 0.0,
+      "avg_r": -1.0,
+      "total_r": -14.0
+    }
+  ],
+  "period_summary_monthly": [
+    {
+      "period": "2025-01",
+      "closed_positions": 14,
+      "hit_rate": 0.0,
+      "avg_r": -1.0,
+      "total_r": -14.0
+    }
+  ]
+}
+report_markdown=artifacts\reports\all_time.md
+report_csv=artifacts\reports\all_time.csv

@@ -31,20 +31,66 @@ def load_outfits(path: Path) -> list[OutfitDefinition]:
     if not isinstance(rows, list):
         raise ValueError("Outfit catalog 'outfits' must be a list")
 
+    required_keys = {
+        "id",
+        "periods",
+        "description",
+        "source_configuration",
+        "source_ambiguous",
+    }
     outfits: list[OutfitDefinition] = []
-    for row in rows:
+    for index, row in enumerate(rows):
         if not isinstance(row, dict):
             raise ValueError("Each outfit row must be a map")
-        periods = tuple(int(period) for period in row["periods"])
+        missing = required_keys.difference(row.keys())
+        if missing:
+            raise ValueError(
+                f"Outfit row[{index}] missing required keys: {sorted(missing)}"
+            )
+        unexpected = set(row.keys()).difference(required_keys)
+        if unexpected:
+            raise ValueError(
+                f"Outfit row[{index}] has unexpected keys: {sorted(unexpected)}"
+            )
+
+        outfit_id = row["id"]
+        if not isinstance(outfit_id, str) or not outfit_id.strip():
+            raise ValueError(f"Outfit row[{index}] id must be non-empty string")
+
+        periods_raw = row["periods"]
+        if not isinstance(periods_raw, list) or not periods_raw:
+            raise ValueError(
+                f"Outfit row[{index}] periods must be a non-empty list of integers"
+            )
+        if any(not isinstance(period, int) or isinstance(period, bool) for period in periods_raw):
+            raise ValueError(f"Outfit row[{index}] periods must contain integers only")
+        periods = tuple(periods_raw)
         if any(period < 1 or period > 999 for period in periods):
-            raise ValueError(f"Invalid period in outfit {row.get('id')}")
+            raise ValueError(f"Invalid period in outfit {outfit_id}")
+
+        description = row["description"]
+        if not isinstance(description, str):
+            raise ValueError(f"Outfit row[{index}] description must be string")
+
+        source_configuration = row["source_configuration"]
+        if not isinstance(source_configuration, str):
+            raise ValueError(
+                f"Outfit row[{index}] source_configuration must be string"
+            )
+
+        source_ambiguous = row["source_ambiguous"]
+        if not isinstance(source_ambiguous, bool):
+            raise ValueError(
+                f"Outfit row[{index}] source_ambiguous must be boolean"
+            )
+
         outfits.append(
             OutfitDefinition(
-                outfit_id=str(row["id"]),
+                outfit_id=outfit_id.strip(),
                 periods=periods,
-                description=str(row.get("description", "")),
-                source_configuration=str(row.get("source_configuration", "")),
-                source_ambiguous=bool(row.get("source_ambiguous", False)),
+                description=description,
+                source_configuration=source_configuration,
+                source_ambiguous=source_ambiguous,
             )
         )
     return outfits

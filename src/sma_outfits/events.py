@@ -75,8 +75,8 @@ class PositionEvent:
 @dataclass(frozen=True, slots=True)
 class ArchiveRecord:
     signal_id: str
-    chart_path: str
     markdown_path: str
+    artifact_type: str
     caption: str
     ts: datetime
 
