@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from enum import Enum
 from pathlib import Path
+from typing import Annotated
 
 import pandas as pd
 import typer
@@ -20,6 +22,12 @@ from sma_outfits.runtime import assert_python_runtime
 from sma_outfits.utils import dedupe_keep_order, ensure_utc_timestamp, market_for_symbol, parse_csv
 
 app = typer.Typer(add_completion=False, help="SMA outfits Alpaca-only recreation CLI")
+
+
+class ReportAttributionMode(str, Enum):
+    strike = "strike"
+    close = "close"
+    both = "both"
 
 
 def _load_runtime_settings(config: Path) -> Settings:
@@ -361,6 +369,13 @@ def report(
         "--range",
         help="UTC range format start:end (date-only) or start,end (full timestamps)",
     ),
+    attribution: Annotated[
+        ReportAttributionMode,
+        typer.Option(
+            "--attribution",
+            help="Report attribution mode: strike, close, or both",
+        ),
+    ] = ReportAttributionMode.both,
 ) -> None:
     assert_python_runtime()
     settings = _load_runtime_settings(config)
@@ -376,6 +391,7 @@ def report(
         position_rows=positions,
         start=start_ts,
         end=end_ts,
+        attribution_mode=attribution.value,
     )
     label = (
         f"{start_ts.strftime('%Y%m%d')}_{end_ts.strftime('%Y%m%d')}"

@@ -327,6 +327,57 @@ class SignalConfig(BaseModel):
         return value
 
 
+class RouteConfluenceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    min_outfit_alignment_count: int = 0
+    volume_lookback_bars: int = 20
+    volume_spike_ratio: float = 1.5
+
+    @field_validator("min_outfit_alignment_count")
+    @classmethod
+    def _validate_alignment_count(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("strategy route confluence min_outfit_alignment_count must be >= 0")
+        return value
+
+    @field_validator("volume_lookback_bars")
+    @classmethod
+    def _validate_volume_lookback_bars(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("strategy route confluence volume_lookback_bars must be > 0")
+        return value
+
+    @field_validator("volume_spike_ratio")
+    @classmethod
+    def _validate_volume_spike_ratio(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("strategy route confluence volume_spike_ratio must be > 0")
+        return value
+
+
+class RouteATRConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    period: int = 14
+    multiplier: float = 1.5
+
+    @field_validator("period")
+    @classmethod
+    def _validate_period(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("strategy route atr period must be > 0")
+        return value
+
+    @field_validator("multiplier")
+    @classmethod
+    def _validate_multiplier(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("strategy route atr multiplier must be > 0")
+        return value
+
+
 class RouteRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -345,8 +396,10 @@ class RouteRule(BaseModel):
     micro_periods: list[int]
     ignore_close_below_key_when_micro_positive: bool = False
     macro_gate: Literal["none", "spx", "nas", "dji"] = "none"
-    risk_mode: Literal["singular_penny_only"] = "singular_penny_only"
+    risk_mode: Literal["singular_penny_only", "atr_dynamic_stop"] = "singular_penny_only"
     stop_offset: float = 0.01
+    confluence: RouteConfluenceConfig = Field(default_factory=RouteConfluenceConfig)
+    atr: RouteATRConfig = Field(default_factory=RouteATRConfig)
 
     @field_validator("id", "outfit_id")
     @classmethod
@@ -576,6 +629,20 @@ class Settings(BaseModel):
                         index,
                         route.outfit_id,
                         sorted(set(missing)),
+                    )
+                )
+            if (
+                route.confluence.enabled
+                and route.confluence.min_outfit_alignment_count > 0
+                and route.confluence.min_outfit_alignment_count > len(periods)
+            ):
+                raise ValueError(
+                    "strategy.routes[{}] confluence.min_outfit_alignment_count={} exceeds "
+                    "outfit '{}' period count ({})".format(
+                        index,
+                        route.confluence.min_outfit_alignment_count,
+                        route.outfit_id,
+                        len(periods),
                     )
                 )
             if self.strategy.ambiguity_policy == "fail" and metadata["source_ambiguous"]:

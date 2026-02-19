@@ -144,12 +144,19 @@ class ReplayEngine:
                     bar=bar,
                     sma_states=sma_states,
                 )
-                new_strikes, new_signals = self.detector.detect(
+                new_strikes, detected_signals = self.detector.detect(
                     bar=bar,
                     sma_states=sma_states,
                     history=history,
                     session_type="regular",
                 )
+                new_signals = [
+                    self.risk_manager.prepare_signal_for_entry(
+                        signal=signal,
+                        route_history=history,
+                    )
+                    for signal in detected_signals
+                ]
                 strikes.extend(new_strikes)
                 signals.extend(new_signals)
                 for signal in new_signals:
@@ -168,6 +175,7 @@ class ReplayEngine:
                         bar=bar,
                         proxy_prices=proxy_prices,
                         route_context=route_context,
+                        route_history=history,
                     )
                     position_events.extend(events)
                     if not position.closed:

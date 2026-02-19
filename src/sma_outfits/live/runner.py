@@ -106,6 +106,7 @@ class LiveRunner:
             symbols=selected_symbols,
             timeframes=selected_timeframes,
         )
+        self._enforce_live_risk_mode_support(execution_pairs)
         self._timeframes_by_symbol = _timeframes_by_symbol(execution_pairs)
         selected_symbols = list(self._timeframes_by_symbol.keys())
         effective_runtime = (
@@ -470,12 +471,19 @@ class LiveRunner:
             bar=bar,
             sma_states=sma_states,
         )
-        new_strikes, new_signals = self._detector.detect(
+        new_strikes, detected_signals = self._detector.detect(
             bar=bar,
             sma_states=sma_states,
             history=history,
             session_type="regular",
         )
+        new_signals = [
+            self._risk_manager.prepare_signal_for_entry(
+                signal=signal,
+                route_history=history,
+            )
+            for signal in detected_signals
+        ]
 
         active_positions = self._active_positions_by_key.get(key, [])
         for signal in new_signals:
@@ -496,6 +504,7 @@ class LiveRunner:
                 bar=bar,
                 proxy_prices=self._proxy_prices,
                 route_context=route_context,
+                route_history=history,
             )
             position_events.extend(events)
             if not position.closed:
@@ -901,6 +910,24 @@ class LiveRunner:
                 seen.add(pair)
                 unique_pairs.append(pair)
         return unique_pairs
+
+    def _enforce_live_risk_mode_support(
+        self,
+        execution_pairs: list[tuple[str, str]],
+    ) -> None:
+        selected_pairs = set(execution_pairs)
+        unsupported_routes = [
+            route.id
+            for route in self.settings.strategy.routes
+            if route.risk_mode == "atr_dynamic_stop"
+            and (route.symbol, route.timeframe) in selected_pairs
+        ]
+        if unsupported_routes:
+            raise RuntimeError(
+                "run-live supports replay-only risk_mode violation: "
+                "atr_dynamic_stop is replay-only in v1. "
+                "Offending routes: " + ", ".join(sorted(unsupported_routes))
+            )
 
     def _ensure_calendar_sessions_for_range(
         self,

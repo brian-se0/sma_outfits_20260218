@@ -15,6 +15,7 @@ def _bar(
     symbol: str = "SPY",
     timeframe: str = "1m",
     close: float,
+    volume: float = 1000.0,
     minute: int,
 ) -> BarEvent:
     ts = datetime(2025, 1, 2, 15, minute, tzinfo=timezone.utc)
@@ -26,20 +27,23 @@ def _bar(
         high=close + 0.2,
         low=close - 0.2,
         close=close,
-        volume=1000,
+        volume=volume,
         source="unit-test",
     )
 
 
-def _history(*closes: float) -> pd.DataFrame:
+def _history(*closes: float, volumes: list[float] | None = None) -> pd.DataFrame:
     rows = list(closes)
+    volume_rows = volumes if volumes is not None else [1000.0 for _ in rows]
+    if len(volume_rows) != len(rows):
+        raise ValueError("history volumes length must match closes length")
     return pd.DataFrame(
         {
             "close": rows,
             "open": rows,
             "high": [value + 0.1 for value in rows],
             "low": [value - 0.1 for value in rows],
-            "volume": [1000.0 for _ in rows],
+            "volume": volume_rows,
         }
     )
 
@@ -246,3 +250,187 @@ def test_load_outfits_accepts_complete_ambiguous_row(tmp_path) -> None:
     outfits = load_outfits(path)
     assert len(outfits) == 1
     assert outfits[0].source_ambiguous is True
+
+
+def test_required_periods_expand_to_route_outfit_when_confluence_enabled() -> None:
+    route = RouteRule(
+        id="spy_1m_confluence",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[5],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+        confluence={
+            "enabled": True,
+            "min_outfit_alignment_count": 2,
+            "volume_lookback_bars": 3,
+            "volume_spike_ratio": 1.5,
+        },
+    )
+    outfits = [OutfitDefinition("route_outfit", (5, 8, 10, 20), "route", "5/8/10/20")]
+    detector = StrikeDetector(outfits=outfits, routes=[route], strict_routing=True)
+
+    periods = detector.required_periods()
+    assert periods.issuperset({5, 8, 10, 20})
+
+
+def test_confluence_enabled_emits_signal_only_when_all_conditions_pass() -> None:
+    route = RouteRule(
+        id="spy_1m_confluence",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[5],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+        confluence={
+            "enabled": True,
+            "min_outfit_alignment_count": 3,
+            "volume_lookback_bars": 3,
+            "volume_spike_ratio": 1.5,
+        },
+    )
+    outfits = [OutfitDefinition("route_outfit", (5, 8, 10), "route", "5/8/10")]
+    detector = StrikeDetector(outfits=outfits, routes=[route], strict_routing=True)
+    bar = _bar(close=100.0, volume=2000.0, minute=7)
+    states = {
+        5: _state(bar, 5, 99.5),
+        8: _state(bar, 8, 99.8),
+        10: _state(bar, 10, 100.0),
+    }
+
+    strikes, signals = detector.detect(
+        bar=bar,
+        sma_states=states,
+        history=_history(99.7, 99.8, 99.9, 100.0, volumes=[1000.0, 1000.0, 1000.0, 2000.0]),
+    )
+    assert len(strikes) == 1
+    assert len(signals) == 1
+
+
+def test_confluence_fails_with_insufficient_outfit_alignment() -> None:
+    route = RouteRule(
+        id="spy_1m_confluence",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[5],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+        confluence={
+            "enabled": True,
+            "min_outfit_alignment_count": 3,
+            "volume_lookback_bars": 3,
+            "volume_spike_ratio": 1.5,
+        },
+    )
+    outfits = [OutfitDefinition("route_outfit", (5, 8, 10), "route", "5/8/10")]
+    detector = StrikeDetector(outfits=outfits, routes=[route], strict_routing=True)
+    bar = _bar(close=100.0, volume=2000.0, minute=8)
+    states = {
+        5: _state(bar, 5, 99.5),
+        8: _state(bar, 8, 101.0),
+        10: _state(bar, 10, 100.0),
+    }
+
+    strikes, signals = detector.detect(
+        bar=bar,
+        sma_states=states,
+        history=_history(99.7, 99.8, 99.9, 100.0, volumes=[1000.0, 1000.0, 1000.0, 2000.0]),
+    )
+    assert strikes == []
+    assert signals == []
+
+
+def test_confluence_fails_without_volume_spike() -> None:
+    route = RouteRule(
+        id="spy_1m_confluence",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[5],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+        confluence={
+            "enabled": True,
+            "min_outfit_alignment_count": 3,
+            "volume_lookback_bars": 3,
+            "volume_spike_ratio": 1.5,
+        },
+    )
+    outfits = [OutfitDefinition("route_outfit", (5, 8, 10), "route", "5/8/10")]
+    detector = StrikeDetector(outfits=outfits, routes=[route], strict_routing=True)
+    bar = _bar(close=100.0, volume=1200.0, minute=9)
+    states = {
+        5: _state(bar, 5, 99.5),
+        8: _state(bar, 8, 99.8),
+        10: _state(bar, 10, 100.0),
+    }
+
+    strikes, signals = detector.detect(
+        bar=bar,
+        sma_states=states,
+        history=_history(99.7, 99.8, 99.9, 100.0, volumes=[1000.0, 1000.0, 1000.0, 1200.0]),
+    )
+    assert strikes == []
+    assert signals == []
+
+
+def test_confluence_fails_when_touch_or_cross_condition_fails() -> None:
+    route = RouteRule(
+        id="spy_1m_confluence",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[5],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+        confluence={
+            "enabled": True,
+            "min_outfit_alignment_count": 3,
+            "volume_lookback_bars": 3,
+            "volume_spike_ratio": 1.1,
+        },
+    )
+    outfits = [OutfitDefinition("route_outfit", (5, 8, 10), "route", "5/8/10")]
+    detector = StrikeDetector(outfits=outfits, routes=[route], strict_routing=True)
+    bar = _bar(close=102.0, volume=2000.0, minute=10)
+    states = {
+        5: _state(bar, 5, 100.0),
+        8: _state(bar, 8, 100.0),
+        10: _state(bar, 10, 100.0),
+    }
+
+    strikes, signals = detector.detect(
+        bar=bar,
+        sma_states=states,
+        history=_history(101.5, 102.0, 102.0, 102.0, volumes=[1000.0, 1000.0, 1000.0, 2000.0]),
+    )
+    assert strikes == []
+    assert signals == []

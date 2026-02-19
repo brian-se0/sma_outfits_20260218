@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pandas as pd
 import pytest
 
 from sma_outfits.config.models import RouteRule
@@ -14,6 +15,9 @@ def _route(
     *,
     route_id: str = "spy_1m_author",
     ignore_micro_override: bool = False,
+    risk_mode: str = "singular_penny_only",
+    atr_period: int = 14,
+    atr_multiplier: float = 1.5,
 ) -> RouteRule:
     return RouteRule(
         id=route_id,
@@ -26,8 +30,12 @@ def _route(
         micro_periods=[10],
         ignore_close_below_key_when_micro_positive=ignore_micro_override,
         macro_gate="none",
-        risk_mode="singular_penny_only",
+        risk_mode=risk_mode,  # type: ignore[arg-type]
         stop_offset=0.01,
+        atr={
+            "period": atr_period,
+            "multiplier": atr_multiplier,
+        },
     )
 
 
@@ -56,6 +64,19 @@ def _bar(ts: datetime, close: float, high: float, low: float) -> BarEvent:
         close=close,
         volume=1000,
         source="unit-test",
+    )
+
+
+def _history_from_rows(
+    rows: list[tuple[str, float, float, float]],
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "ts": [pd.Timestamp(ts).tz_convert("UTC") for ts, _, _, _ in rows],
+            "high": [high for _, high, _, _ in rows],
+            "low": [low for _, _, low, _ in rows],
+            "close": [close for _, _, _, close in rows],
+        }
     )
 
 
@@ -231,4 +252,124 @@ def test_requires_explicit_routes_and_proxy_mappings() -> None:
             position,
             _bar(datetime(2025, 1, 2, 15, 1, tzinfo=timezone.utc), close=100.0, high=100.2, low=99.8),
             proxy_prices=None,  # type: ignore[arg-type]
+        )
+
+
+def test_atr_dynamic_stop_lifecycle_updates_and_closes_position() -> None:
+    route = _route(
+        route_id="spy_1m_atr",
+        risk_mode="atr_dynamic_stop",
+        atr_period=2,
+        atr_multiplier=1.0,
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={route.id: route},
+        allow_same_bar_exit=True,
+    )
+
+    signal = _signal("atr", route.id, 100.0)
+    entry_history = _history_from_rows(
+        [
+            ("2025-01-02T15:00:00Z", 101.0, 99.0, 100.0),
+            ("2025-01-02T15:01:00Z", 102.0, 100.0, 101.0),
+            ("2025-01-02T15:02:00Z", 103.0, 101.0, 102.0),
+        ]
+    )
+    prepared_signal = manager.prepare_signal_for_entry(signal, route_history=entry_history)
+    assert prepared_signal.stop == 98.0
+
+    position = manager.open_position(
+        signal=prepared_signal,
+        symbol="SPY",
+        ts=datetime(2025, 1, 2, 15, 2, tzinfo=timezone.utc),
+    )
+
+    trailing_history = _history_from_rows(
+        [
+            ("2025-01-02T15:01:00Z", 102.0, 100.0, 101.0),
+            ("2025-01-02T15:02:00Z", 103.0, 101.0, 102.0),
+            ("2025-01-02T15:03:00Z", 105.0, 103.0, 104.0),
+        ]
+    )
+    first_events = manager.evaluate_bar(
+        position,
+        _bar(datetime(2025, 1, 2, 15, 3, tzinfo=timezone.utc), close=104.0, high=105.0, low=103.0),
+        proxy_prices={},
+        route_history=trailing_history,
+    )
+    assert first_events == []
+    assert position.stop == 101.5
+
+    close_events = manager.evaluate_bar(
+        position,
+        _bar(datetime(2025, 1, 2, 15, 4, tzinfo=timezone.utc), close=102.1, high=102.2, low=101.5),
+        proxy_prices={},
+        route_history=trailing_history,
+    )
+    assert len(close_events) == 1
+    assert close_events[0].reason == "atr_dynamic_stop"
+    assert close_events[0].price == 101.5
+
+
+def test_atr_dynamic_stop_requires_entry_lookback() -> None:
+    route = _route(
+        route_id="spy_1m_atr",
+        risk_mode="atr_dynamic_stop",
+        atr_period=3,
+        atr_multiplier=1.5,
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={route.id: route},
+        allow_same_bar_exit=True,
+    )
+
+    with pytest.raises(RuntimeError, match="ATR unavailable at entry"):
+        manager.prepare_signal_for_entry(
+            _signal("atr-missing", route.id, 100.0),
+            route_history=_history_from_rows(
+                [
+                    ("2025-01-02T15:00:00Z", 101.0, 99.0, 100.0),
+                    ("2025-01-02T15:01:00Z", 102.0, 100.0, 101.0),
+                    ("2025-01-02T15:02:00Z", 103.0, 101.0, 102.0),
+                ]
+            ),
+        )
+
+
+def test_atr_dynamic_stop_requires_route_history_during_evaluation() -> None:
+    route = _route(
+        route_id="spy_1m_atr",
+        risk_mode="atr_dynamic_stop",
+        atr_period=2,
+        atr_multiplier=1.0,
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={route.id: route},
+        allow_same_bar_exit=True,
+    )
+    signal = manager.prepare_signal_for_entry(
+        _signal("atr-history", route.id, 100.0),
+        route_history=_history_from_rows(
+            [
+                ("2025-01-02T15:00:00Z", 101.0, 99.0, 100.0),
+                ("2025-01-02T15:01:00Z", 102.0, 100.0, 101.0),
+                ("2025-01-02T15:02:00Z", 103.0, 101.0, 102.0),
+            ]
+        ),
+    )
+    position = manager.open_position(
+        signal=signal,
+        symbol="SPY",
+        ts=datetime(2025, 1, 2, 15, 2, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(RuntimeError, match="requires explicit route_history input"):
+        manager.evaluate_bar(
+            position,
+            _bar(datetime(2025, 1, 2, 15, 3, tzinfo=timezone.utc), close=102.0, high=102.5, low=101.5),
+            proxy_prices={},
+            route_history=None,
         )

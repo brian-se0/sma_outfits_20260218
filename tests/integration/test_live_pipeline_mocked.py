@@ -224,6 +224,50 @@ def test_live_pipeline_fails_fast_on_malformed_stream_payload(
         raise AssertionError("Expected live run to fail on malformed payload")
 
 
+def test_live_pipeline_fails_fast_when_atr_route_selected(
+    settings,
+    tmp_path: Path,
+) -> None:
+    routes = [
+        RouteRule(
+            id="spy_1m_atr",
+            symbol="SPY",
+            timeframe="1m",
+            outfit_id="test_outfit",
+            key_period=1,
+            side="LONG",
+            signal_type="optimized_buy",
+            micro_periods=[1],
+            ignore_close_below_key_when_micro_positive=False,
+            macro_gate="none",
+            risk_mode="atr_dynamic_stop",
+            stop_offset=0.01,
+            atr={"period": 14, "multiplier": 1.5},
+        )
+    ]
+    live_settings = _live_settings_with_routes(settings, tmp_path, routes)
+    storage = StorageManager(Path(live_settings.storage_root))
+    runner = LiveRunner(
+        settings=live_settings,
+        storage=storage,
+        stream_factory=MockStreamFactory(),
+    )
+
+    try:
+        asyncio.run(
+            runner.run(
+                symbols=["SPY"],
+                timeframes=["1m"],
+                runtime_seconds=0.3,
+                warmup_minutes=0,
+            )
+        )
+    except RuntimeError as exc:
+        assert "atr_dynamic_stop is replay-only in v1" in str(exc)
+    else:
+        raise AssertionError("Expected live run to fail for replay-only ATR route")
+
+
 def _bar(symbol: str, ts: str, close: float) -> LiveBar:
     timestamp = pd.Timestamp(ts).tz_convert("UTC")
     return LiveBar(

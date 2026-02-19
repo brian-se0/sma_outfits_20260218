@@ -431,3 +431,128 @@ def test_strategy_ambiguity_policy_fail_rejects_ambiguous_outfit(tmp_path: Path)
 
     with pytest.raises(ValueError, match="references ambiguous outfit"):
         load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_strategy_route_confluence_alignment_bound_rejected(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    outfits_path = tmp_path / "outfits.yaml"
+    outfits_path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: test_outfit",
+                "    periods: [10, 20]",
+                "    description: test",
+                "    source_configuration: test",
+                "    source_ambiguous: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {
+        "outfits_path": str(outfits_path),
+        "strategy": {
+            "strict_routing": True,
+            "routes": [
+                {
+                    "id": "route-1",
+                    "symbol": "SPY",
+                    "timeframe": "1m",
+                    "outfit_id": "test_outfit",
+                    "key_period": 10,
+                    "side": "LONG",
+                    "signal_type": "precision_buy",
+                    "micro_periods": [10],
+                    "ignore_close_below_key_when_micro_positive": False,
+                    "macro_gate": "none",
+                    "risk_mode": "singular_penny_only",
+                    "stop_offset": 0.01,
+                    "confluence": {
+                        "enabled": True,
+                        "min_outfit_alignment_count": 3,
+                        "volume_lookback_bars": 20,
+                        "volume_spike_ratio": 1.5,
+                    },
+                }
+            ],
+        },
+    }
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="confluence.min_outfit_alignment_count=.*exceeds"):
+        load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_strategy_route_atr_validation_rejects_non_positive_multiplier(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    outfits_path = tmp_path / "outfits.yaml"
+    outfits_path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: test_outfit",
+                "    periods: [10]",
+                "    description: test",
+                "    source_configuration: test",
+                "    source_ambiguous: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {
+        "outfits_path": str(outfits_path),
+        "strategy": {
+            "strict_routing": True,
+            "routes": [
+                {
+                    "id": "route-1",
+                    "symbol": "SPY",
+                    "timeframe": "1m",
+                    "outfit_id": "test_outfit",
+                    "key_period": 10,
+                    "side": "LONG",
+                    "signal_type": "precision_buy",
+                    "micro_periods": [10],
+                    "ignore_close_below_key_when_micro_positive": False,
+                    "macro_gate": "none",
+                    "risk_mode": "atr_dynamic_stop",
+                    "stop_offset": 0.01,
+                    "atr": {"period": 14, "multiplier": 0.0},
+                }
+            ],
+        },
+    }
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="atr multiplier must be > 0"):
+        load_settings(config_path=config_path, env_path=env_path)

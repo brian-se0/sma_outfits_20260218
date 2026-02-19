@@ -11,6 +11,7 @@ from sma_outfits.reporting.summary import (
     _rate_breakdown,
     build_summary,
     build_summary_from_records,
+    write_summary_report,
 )
 
 
@@ -185,3 +186,152 @@ def test_breakdown_fails_when_label_key_missing() -> None:
         _rate_breakdown(rows=[{"realized_r": 1.0}], key="signal_type")
     with pytest.raises(RuntimeError, match="missing required key 'signal_type'"):
         _r_breakdown(rows=[{"realized_r": 1.0}], key="signal_type")
+
+
+def test_build_summary_from_records_both_mode_keeps_strike_top_level_and_adds_close_payload() -> None:
+    strike = StrikeEvent(
+        id="strike-old",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="outfit-a",
+        period=10,
+        sma_value=100.0,
+        bar_ts=datetime(2025, 1, 1, 14, 30, tzinfo=timezone.utc),
+        tolerance=0.01,
+        trigger_mode="bar_touch",
+    )
+    signal = SignalEvent(
+        id="signal-close-in-range",
+        strike_id="strike-old",
+        route_id="route-1",
+        side="LONG",
+        signal_type="precision_buy",
+        entry=100.0,
+        stop=99.0,
+        confidence="HIGH",
+        session_type="regular",
+    )
+    close_event = PositionEvent(
+        id="close-in-range",
+        signal_id=signal.id,
+        action="close",
+        qty=1.0,
+        price=101.0,
+        reason="+1R_partial_and_breakeven_stop",
+        ts=datetime(2025, 1, 2, 14, 35, tzinfo=timezone.utc),
+    )
+
+    summary = build_summary_from_records(
+        strike_rows=[event_to_record(strike)],
+        signal_rows=[event_to_record(signal)],
+        position_rows=[event_to_record(close_event)],
+        start=pd.Timestamp("2025-01-02T00:00:00Z"),
+        end=pd.Timestamp("2025-01-02T23:59:59Z"),
+        attribution_mode="both",
+    )
+
+    assert summary["attribution_mode"] == "both"
+    assert summary["closed_positions"] == 0
+    assert summary["close_attribution"]["closed_positions"] == 1
+    assert summary["close_attribution"]["total_signals"] == 1
+
+
+def test_build_summary_from_records_close_mode_uses_close_totals_top_level() -> None:
+    strike = StrikeEvent(
+        id="strike-old",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="outfit-a",
+        period=10,
+        sma_value=100.0,
+        bar_ts=datetime(2025, 1, 1, 14, 30, tzinfo=timezone.utc),
+        tolerance=0.01,
+        trigger_mode="bar_touch",
+    )
+    signal = SignalEvent(
+        id="signal-close-in-range",
+        strike_id="strike-old",
+        route_id="route-1",
+        side="LONG",
+        signal_type="precision_buy",
+        entry=100.0,
+        stop=99.0,
+        confidence="HIGH",
+        session_type="regular",
+    )
+    close_event = PositionEvent(
+        id="close-in-range",
+        signal_id=signal.id,
+        action="close",
+        qty=1.0,
+        price=101.0,
+        reason="+1R_partial_and_breakeven_stop",
+        ts=datetime(2025, 1, 2, 14, 35, tzinfo=timezone.utc),
+    )
+
+    summary = build_summary_from_records(
+        strike_rows=[event_to_record(strike)],
+        signal_rows=[event_to_record(signal)],
+        position_rows=[event_to_record(close_event)],
+        start=pd.Timestamp("2025-01-02T00:00:00Z"),
+        end=pd.Timestamp("2025-01-02T23:59:59Z"),
+        attribution_mode="close",
+    )
+
+    assert summary["attribution_mode"] == "close"
+    assert summary["closed_positions"] == 1
+    assert summary["total_signals"] == 1
+    assert summary["close_attribution"]["closed_positions"] == 1
+
+
+def test_write_summary_report_both_mode_adds_close_columns_and_sections(tmp_path) -> None:
+    strike = StrikeEvent(
+        id="strike-old",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="outfit-a",
+        period=10,
+        sma_value=100.0,
+        bar_ts=datetime(2025, 1, 1, 14, 30, tzinfo=timezone.utc),
+        tolerance=0.01,
+        trigger_mode="bar_touch",
+    )
+    signal = SignalEvent(
+        id="signal-close-in-range",
+        strike_id="strike-old",
+        route_id="route-1",
+        side="LONG",
+        signal_type="precision_buy",
+        entry=100.0,
+        stop=99.0,
+        confidence="HIGH",
+        session_type="regular",
+    )
+    close_event = PositionEvent(
+        id="close-in-range",
+        signal_id=signal.id,
+        action="close",
+        qty=1.0,
+        price=101.0,
+        reason="+1R_partial_and_breakeven_stop",
+        ts=datetime(2025, 1, 2, 14, 35, tzinfo=timezone.utc),
+    )
+    summary = build_summary_from_records(
+        strike_rows=[event_to_record(strike)],
+        signal_rows=[event_to_record(signal)],
+        position_rows=[event_to_record(close_event)],
+        start=pd.Timestamp("2025-01-02T00:00:00Z"),
+        end=pd.Timestamp("2025-01-02T23:59:59Z"),
+        attribution_mode="both",
+    )
+
+    markdown_path, csv_path = write_summary_report(summary, tmp_path, "range_test")
+
+    csv = pd.read_csv(csv_path)
+    assert "attribution_mode" in csv.columns
+    assert "close_total_signals" in csv.columns
+    assert str(csv.iloc[0]["attribution_mode"]) == "both"
+
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "Strike-Time Attribution" in markdown
+    assert "Close-Time Attribution" in markdown

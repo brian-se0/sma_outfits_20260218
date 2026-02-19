@@ -5,12 +5,14 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from statistics import median
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 
 from sma_outfits.events import PositionEvent, SignalEvent, StrikeEvent
 from sma_outfits.utils import ensure_utc_timestamp
+
+AttributionMode = Literal["strike", "close", "both"]
 
 
 def build_summary(
@@ -73,24 +75,44 @@ def build_summary_from_records(
     position_rows: list[dict[str, Any]],
     start: pd.Timestamp | None = None,
     end: pd.Timestamp | None = None,
+    attribution_mode: AttributionMode = "both",
 ) -> dict[str, Any]:
+    if attribution_mode not in {"strike", "close", "both"}:
+        raise ValueError(
+            "Unsupported attribution_mode '{}'. Expected one of: strike, close, both".format(
+                attribution_mode
+            )
+        )
+
     strikes = [_record_to_strike(row) for row in strike_rows]
     signals = [_record_to_signal(row) for row in signal_rows]
     positions = [_record_to_position(row) for row in position_rows]
 
-    if start is not None and end is not None:
-        strikes = [strike for strike in strikes if _in_range(strike.bar_ts, start, end)]
-        allowed_strikes = {strike.id for strike in strikes}
-        signals = [signal for signal in signals if signal.strike_id in allowed_strikes]
-        allowed_signals = {signal.id for signal in signals}
-        positions = [
-            position
-            for position in positions
-            if _in_range(position.ts, start, end)
-            and position.signal_id in allowed_signals
-        ]
+    strike_summary = _build_strike_attribution_summary(
+        strikes=strikes,
+        signals=signals,
+        positions=positions,
+        start=start,
+        end=end,
+    )
+    close_summary = _build_close_attribution_summary(
+        strikes=strikes,
+        signals=signals,
+        positions=positions,
+        start=start,
+        end=end,
+    )
 
-    return build_summary(strikes=strikes, signals=signals, position_events=positions)
+    if attribution_mode == "strike":
+        summary = dict(strike_summary)
+    elif attribution_mode == "close":
+        summary = dict(close_summary)
+        summary["close_attribution"] = dict(close_summary)
+    else:
+        summary = dict(strike_summary)
+        summary["close_attribution"] = dict(close_summary)
+    summary["attribution_mode"] = attribution_mode
+    return summary
 
 
 def write_summary_report(
@@ -102,80 +124,54 @@ def write_summary_report(
     markdown_path = root / f"{label}.md"
     csv_path = root / f"{label}.csv"
 
+    attribution_mode = str(summary.get("attribution_mode", "strike"))
     markdown: list[str] = [
         f"# Replay Summary: {label}",
         "",
-        f"- total_strikes: `{summary['total_strikes']}`",
-        f"- total_signals: `{summary['total_signals']}`",
-        f"- total_position_events: `{summary['total_position_events']}`",
-        f"- closed_positions: `{summary['closed_positions']}`",
-        f"- hit_rate: `{summary['hit_rate']:.4f}`",
+        f"- attribution_mode: `{attribution_mode}`",
         "",
-        "## R Outcomes",
-        f"- total_realized_r: `{summary['r_outcome']['total_realized_r']:.4f}`",
-        f"- avg_realized_r: `{summary['r_outcome']['avg_realized_r']:.4f}`",
-        f"- median_realized_r: `{summary['r_outcome']['median_realized_r']:.4f}`",
-        f"- min_realized_r: `{summary['r_outcome']['min_realized_r']:.4f}`",
-        f"- max_realized_r: `{summary['r_outcome']['max_realized_r']:.4f}`",
-        "",
-        "### R Buckets",
     ]
-    for bucket, count in summary["r_outcome"]["bucket_counts"].items():
-        markdown.append(f"- `{bucket}`: `{count}`")
 
-    markdown.append("")
-    markdown.append("## Hit Rate By Signal Type")
-    for row in summary["hit_rate_by_signal_type"]:
-        markdown.append(
-            "- `{}`: count=`{}`, hits=`{}`, hit_rate=`{:.4f}`".format(
-                row["label"],
-                row["count"],
-                row["hits"],
-                row["hit_rate"],
+    if attribution_mode == "both":
+        close_summary = _require_close_attribution(summary)
+        markdown.extend(
+            _render_markdown_section(
+                title="Strike-Time Attribution",
+                summary=summary,
             )
         )
-
-    markdown.append("")
-    markdown.append("## Hit Rate By Side")
-    for row in summary["hit_rate_by_side"]:
-        markdown.append(
-            "- `{}`: count=`{}`, hits=`{}`, hit_rate=`{:.4f}`".format(
-                row["label"],
-                row["count"],
-                row["hits"],
-                row["hit_rate"],
+        markdown.append("")
+        markdown.extend(
+            _render_markdown_section(
+                title="Close-Time Attribution",
+                summary=close_summary,
             )
         )
-
-    markdown.append("")
-    markdown.append("## Top Symbols")
-    for symbol, count in summary["top_symbols"]:
-        markdown.append(f"- `{symbol}`: `{count}`")
-
-    markdown.append("")
-    markdown.append("## Top Outfits")
-    for outfit, count in summary["top_outfits"]:
-        markdown.append(f"- `{outfit}`: `{count}`")
-
-    markdown.append("")
-    markdown.append("## Daily Close Summary")
-    for row in summary["period_summary_daily"][:10]:
-        markdown.append(
-            "- `{}`: closed=`{}`, hit_rate=`{:.4f}`, avg_r=`{:.4f}`, total_r=`{:.4f}`".format(
-                row["period"],
-                row["closed_positions"],
-                row["hit_rate"],
-                row["avg_r"],
-                row["total_r"],
+    elif attribution_mode == "close":
+        markdown.extend(
+            _render_markdown_section(
+                title="Close-Time Attribution",
+                summary=summary,
+            )
+        )
+    else:
+        markdown.extend(
+            _render_markdown_section(
+                title="Strike-Time Attribution",
+                summary=summary,
             )
         )
 
     markdown_path.write_text("\n".join(markdown) + "\n", encoding="utf-8")
 
-    flattened = {
-        key: value if not isinstance(value, (list, dict)) else str(value)
-        for key, value in summary.items()
-    }
+    flattened = _flatten_summary(summary, skip_keys={"close_attribution"})
+    if "attribution_mode" not in flattened:
+        flattened["attribution_mode"] = attribution_mode
+
+    close_payload = summary.get("close_attribution")
+    if isinstance(close_payload, dict):
+        flattened.update(_flatten_summary(close_payload, prefix="close_"))
+
     pd.DataFrame([flattened]).to_csv(csv_path, index=False)
     return markdown_path, csv_path
 
@@ -234,6 +230,184 @@ def _compute_signal_outcomes(
             }
         )
     return outcomes
+
+
+def _build_strike_attribution_summary(
+    *,
+    strikes: list[StrikeEvent],
+    signals: list[SignalEvent],
+    positions: list[PositionEvent],
+    start: pd.Timestamp | None,
+    end: pd.Timestamp | None,
+) -> dict[str, Any]:
+    selected_strikes = strikes
+    selected_signals = signals
+    selected_positions = positions
+    if start is not None and end is not None:
+        selected_strikes = [
+            strike for strike in strikes if _in_range(strike.bar_ts, start, end)
+        ]
+        allowed_strikes = {strike.id for strike in selected_strikes}
+        selected_signals = [
+            signal for signal in signals if signal.strike_id in allowed_strikes
+        ]
+        allowed_signals = {signal.id for signal in selected_signals}
+        selected_positions = [
+            position
+            for position in positions
+            if _in_range(position.ts, start, end)
+            and position.signal_id in allowed_signals
+        ]
+
+    return build_summary(
+        strikes=selected_strikes,
+        signals=selected_signals,
+        position_events=selected_positions,
+    )
+
+
+def _build_close_attribution_summary(
+    *,
+    strikes: list[StrikeEvent],
+    signals: list[SignalEvent],
+    positions: list[PositionEvent],
+    start: pd.Timestamp | None,
+    end: pd.Timestamp | None,
+) -> dict[str, Any]:
+    if start is None or end is None:
+        return build_summary(strikes=strikes, signals=signals, position_events=positions)
+
+    strike_lookup = {strike.id: strike for strike in strikes}
+    outcomes = _compute_signal_outcomes(
+        signals=signals,
+        position_events=positions,
+        strike_lookup=strike_lookup,
+    )
+    selected_signal_ids = {
+        str(outcome["signal_id"])
+        for outcome in outcomes
+        if bool(outcome["closed"])
+        and outcome["close_ts"] is not None
+        and _in_range(outcome["close_ts"], start, end)
+    }
+    selected_signals = [
+        signal for signal in signals if signal.id in selected_signal_ids
+    ]
+    selected_strike_ids = {signal.strike_id for signal in selected_signals}
+    selected_strikes = [
+        strike for strike in strikes if strike.id in selected_strike_ids
+    ]
+    selected_positions = [
+        position for position in positions if position.signal_id in selected_signal_ids
+    ]
+    return build_summary(
+        strikes=selected_strikes,
+        signals=selected_signals,
+        position_events=selected_positions,
+    )
+
+
+def _render_markdown_section(
+    *,
+    title: str,
+    summary: dict[str, Any],
+) -> list[str]:
+    markdown: list[str] = [
+        f"## {title}",
+        f"- total_strikes: `{summary['total_strikes']}`",
+        f"- total_signals: `{summary['total_signals']}`",
+        f"- total_position_events: `{summary['total_position_events']}`",
+        f"- closed_positions: `{summary['closed_positions']}`",
+        f"- hit_rate: `{summary['hit_rate']:.4f}`",
+        "",
+        "### R Outcomes",
+        f"- total_realized_r: `{summary['r_outcome']['total_realized_r']:.4f}`",
+        f"- avg_realized_r: `{summary['r_outcome']['avg_realized_r']:.4f}`",
+        f"- median_realized_r: `{summary['r_outcome']['median_realized_r']:.4f}`",
+        f"- min_realized_r: `{summary['r_outcome']['min_realized_r']:.4f}`",
+        f"- max_realized_r: `{summary['r_outcome']['max_realized_r']:.4f}`",
+        "",
+        "#### R Buckets",
+    ]
+    for bucket, count in summary["r_outcome"]["bucket_counts"].items():
+        markdown.append(f"- `{bucket}`: `{count}`")
+
+    markdown.append("")
+    markdown.append("### Hit Rate By Signal Type")
+    for row in summary["hit_rate_by_signal_type"]:
+        markdown.append(
+            "- `{}`: count=`{}`, hits=`{}`, hit_rate=`{:.4f}`".format(
+                row["label"],
+                row["count"],
+                row["hits"],
+                row["hit_rate"],
+            )
+        )
+
+    markdown.append("")
+    markdown.append("### Hit Rate By Side")
+    for row in summary["hit_rate_by_side"]:
+        markdown.append(
+            "- `{}`: count=`{}`, hits=`{}`, hit_rate=`{:.4f}`".format(
+                row["label"],
+                row["count"],
+                row["hits"],
+                row["hit_rate"],
+            )
+        )
+
+    markdown.append("")
+    markdown.append("### Top Symbols")
+    for symbol, count in summary["top_symbols"]:
+        markdown.append(f"- `{symbol}`: `{count}`")
+
+    markdown.append("")
+    markdown.append("### Top Outfits")
+    for outfit, count in summary["top_outfits"]:
+        markdown.append(f"- `{outfit}`: `{count}`")
+
+    markdown.append("")
+    markdown.append("### Daily Close Summary")
+    for row in summary["period_summary_daily"][:10]:
+        markdown.append(
+            "- `{}`: closed=`{}`, hit_rate=`{:.4f}`, avg_r=`{:.4f}`, total_r=`{:.4f}`".format(
+                row["period"],
+                row["closed_positions"],
+                row["hit_rate"],
+                row["avg_r"],
+                row["total_r"],
+            )
+        )
+    return markdown
+
+
+def _flatten_summary(
+    payload: dict[str, Any],
+    *,
+    prefix: str = "",
+    skip_keys: set[str] | None = None,
+) -> dict[str, Any]:
+    skip = skip_keys or set()
+    flattened: dict[str, Any] = {}
+    for key, value in payload.items():
+        if key in skip:
+            continue
+        output_key = f"{prefix}{key}"
+        if isinstance(value, (list, dict)):
+            flattened[output_key] = str(value)
+        else:
+            flattened[output_key] = value
+    return flattened
+
+
+def _require_close_attribution(summary: dict[str, Any]) -> dict[str, Any]:
+    close_payload = summary.get("close_attribution")
+    if not isinstance(close_payload, dict):
+        raise RuntimeError(
+            "Summary contract violation: attribution_mode='both' requires "
+            "dict close_attribution payload"
+        )
+    return close_payload
 
 
 def _rate_breakdown(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:

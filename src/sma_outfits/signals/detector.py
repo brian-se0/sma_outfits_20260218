@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from statistics import median
 
 import pandas as pd
 import yaml
@@ -145,6 +146,13 @@ class StrikeDetector:
         for route in self._routes_by_key.values():
             periods.add(route.key_period)
             periods.update(route.micro_periods)
+            if route.confluence.enabled:
+                outfit = self._outfits_by_id.get(route.outfit_id)
+                if outfit is None:
+                    raise RuntimeError(
+                        f"Route '{route.id}' references unknown outfit '{route.outfit_id}'"
+                    )
+                periods.update(outfit.periods)
             if route.macro_gate != "none":
                 macro_periods = MACRO_PERIODS.get(route.macro_gate)
                 if macro_periods is None:
@@ -215,6 +223,13 @@ class StrikeDetector:
         if not context.micro_positive or not context.macro_positive:
             return [], []
         if not self._triggered(bar=bar, context=context, history=history):
+            return [], []
+        if not self._passes_confluence(
+            bar=bar,
+            route=context.route,
+            sma_states=sma_states,
+            history=history,
+        ):
             return [], []
 
         route = context.route
@@ -289,6 +304,58 @@ class StrikeDetector:
             else:
                 cross = prev_close > key_sma and bar.close <= key_sma
         return touch or cross
+
+    def _passes_confluence(
+        self,
+        bar: BarEvent,
+        route: RouteRule,
+        sma_states: dict[int, SMAState],
+        history: pd.DataFrame,
+    ) -> bool:
+        confluence = route.confluence
+        if not confluence.enabled:
+            return True
+
+        outfit = self._outfits_by_id.get(route.outfit_id)
+        if outfit is None:
+            raise RuntimeError(
+                f"Route '{route.id}' references unknown outfit '{route.outfit_id}'"
+            )
+
+        alignment_count = 0
+        for period in outfit.periods:
+            state = sma_states.get(period)
+            if state is None:
+                return False
+            if route.side == "LONG":
+                if bar.close >= state.value:
+                    alignment_count += 1
+            else:
+                if bar.close <= state.value:
+                    alignment_count += 1
+
+        if alignment_count < confluence.min_outfit_alignment_count:
+            return False
+
+        if "volume" not in history.columns:
+            return False
+        required = confluence.volume_lookback_bars + 1
+        if len(history) < required:
+            return False
+        previous = history.iloc[-required:-1]
+        if len(previous) != confluence.volume_lookback_bars:
+            return False
+
+        try:
+            volume_values = [float(value) for value in previous["volume"].tolist()]
+        except (TypeError, ValueError):
+            return False
+        if not volume_values:
+            return False
+
+        volume_baseline = float(median(volume_values))
+        threshold = volume_baseline * confluence.volume_spike_ratio
+        return float(bar.volume) >= threshold
 
     @staticmethod
     def _macro_positive(

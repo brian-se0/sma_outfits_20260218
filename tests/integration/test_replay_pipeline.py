@@ -153,3 +153,132 @@ def test_replay_fails_when_outfits_path_missing(settings) -> None:
         assert "Configured outfits catalog path does not exist" in str(exc)
     else:
         raise AssertionError("Expected ReplayEngine initialization to fail")
+
+
+def test_replay_atr_dynamic_stop_exits_with_atr_reason(settings, tmp_path: Path) -> None:
+    outfits_path = tmp_path / "atr_outfits.yaml"
+    outfits_path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: atr_test",
+                "    periods: [2, 3]",
+                "    description: atr test",
+                "    source_configuration: atr",
+                "    source_ambiguous: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    replay_settings = settings.model_copy(deep=True)
+    replay_settings.outfits_path = str(outfits_path)
+    replay_settings.universe.symbols = ["SPY"]
+    replay_settings.timeframes.live = ["1h"]
+    replay_settings.archive.enabled = False
+    replay_settings.strategy.price_basis = "close"
+    replay_settings.strategy.strict_routing = True
+    replay_settings.strategy.allow_same_bar_exit = False
+    replay_settings.strategy.routes = [
+        RouteRule(
+            id="spy_1h_atr",
+            symbol="SPY",
+            timeframe="1h",
+            outfit_id="atr_test",
+            key_period=2,
+            side="LONG",
+            signal_type="optimized_buy",
+            micro_periods=[3],
+            ignore_close_below_key_when_micro_positive=False,
+            macro_gate="none",
+            risk_mode="atr_dynamic_stop",
+            stop_offset=0.01,
+            atr={"period": 2, "multiplier": 1.0},
+        )
+    ]
+    storage = StorageManager(Path(replay_settings.storage_root))
+    bars = _frame(
+        start="2025-01-02T14:00:00Z",
+        freq="1h",
+        closes=[100.0, 100.0, 101.0, 104.0, 102.0],
+        lows=[99.8, 99.8, 100.8, 103.8, 101.0],
+    )
+    storage.write_bars(bars, symbol="SPY", timeframe="1h")
+
+    engine = ReplayEngine(settings=replay_settings, storage=storage)
+    result = engine.run(
+        start=pd.Timestamp("2025-01-02T14:00:00Z"),
+        end=pd.Timestamp("2025-01-03T00:00:00Z"),
+        symbols=["SPY"],
+        timeframes=["1h"],
+    )
+
+    assert len(result.signals) >= 1
+    assert any(event.reason == "atr_dynamic_stop" for event in result.position_events)
+
+
+def test_replay_atr_dynamic_stop_fails_when_entry_atr_unavailable(
+    settings,
+    tmp_path: Path,
+) -> None:
+    outfits_path = tmp_path / "atr_outfits.yaml"
+    outfits_path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: atr_test",
+                "    periods: [2, 3]",
+                "    description: atr test",
+                "    source_configuration: atr",
+                "    source_ambiguous: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    replay_settings = settings.model_copy(deep=True)
+    replay_settings.outfits_path = str(outfits_path)
+    replay_settings.universe.symbols = ["SPY"]
+    replay_settings.timeframes.live = ["1h"]
+    replay_settings.archive.enabled = False
+    replay_settings.strategy.price_basis = "close"
+    replay_settings.strategy.strict_routing = True
+    replay_settings.strategy.allow_same_bar_exit = False
+    replay_settings.strategy.routes = [
+        RouteRule(
+            id="spy_1h_atr",
+            symbol="SPY",
+            timeframe="1h",
+            outfit_id="atr_test",
+            key_period=2,
+            side="LONG",
+            signal_type="optimized_buy",
+            micro_periods=[3],
+            ignore_close_below_key_when_micro_positive=False,
+            macro_gate="none",
+            risk_mode="atr_dynamic_stop",
+            stop_offset=0.01,
+            atr={"period": 5, "multiplier": 1.0},
+        )
+    ]
+    storage = StorageManager(Path(replay_settings.storage_root))
+    bars = _frame(
+        start="2025-01-02T14:00:00Z",
+        freq="1h",
+        closes=[100.0, 100.0, 101.0],
+        lows=[99.8, 99.8, 100.8],
+    )
+    storage.write_bars(bars, symbol="SPY", timeframe="1h")
+
+    engine = ReplayEngine(settings=replay_settings, storage=storage)
+    try:
+        engine.run(
+            start=pd.Timestamp("2025-01-02T14:00:00Z"),
+            end=pd.Timestamp("2025-01-03T00:00:00Z"),
+            symbols=["SPY"],
+            timeframes=["1h"],
+        )
+    except RuntimeError as exc:
+        assert "ATR unavailable at entry" in str(exc)
+    else:
+        raise AssertionError("Expected replay ATR route to fail when entry ATR is unavailable")

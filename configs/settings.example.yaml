@@ -133,6 +133,14 @@ strategy:
       macro_gate: nas
       risk_mode: singular_penny_only
       stop_offset: 0.01
+      confluence:
+        enabled: false
+        min_outfit_alignment_count: 0
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
     - id: rwm_30m_author
       symbol: RWM
       timeframe: 30m
@@ -145,6 +153,14 @@ strategy:
       macro_gate: none
       risk_mode: singular_penny_only
       stop_offset: 0.01
+      confluence:
+        enabled: false
+        min_outfit_alignment_count: 0
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
 
 risk:
   long_break: 0.01
