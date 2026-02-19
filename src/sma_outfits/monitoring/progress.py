@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import monotonic
 from typing import TextIO
 
@@ -15,13 +15,13 @@ class TerminalProgressBar:
     min_interval_seconds: float = 0.1
     stream: TextIO = sys.stderr
     enabled: bool = True
+    _last_render: float = field(init=False, default=0.0, repr=False, compare=False)
+    _current: int = field(init=False, default=0, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.total <= 0:
             raise ValueError("Progress total must be > 0")
         self.enabled = self.enabled and bool(getattr(self.stream, "isatty", lambda: False)())
-        self._last_render = 0.0
-        self._current = 0
 
     def update(self, current: int, status: str = "") -> None:
         clamped = min(max(current, 0), self.total)
@@ -61,11 +61,11 @@ class TerminalStatusLine:
     min_interval_seconds: float = 1.0
     stream: TextIO = sys.stderr
     enabled: bool = True
+    _last_emit: float = field(init=False, default=0.0, repr=False, compare=False)
+    _last_text: str = field(init=False, default="", repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.enabled = self.enabled and bool(getattr(self.stream, "isatty", lambda: False)())
-        self._last_emit = 0.0
-        self._last_text = ""
 
     def update(self, text: str, force: bool = False) -> None:
         if not self.enabled:

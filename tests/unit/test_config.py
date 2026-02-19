@@ -93,3 +93,77 @@ def test_app_timezone_env_does_not_override_sessions_timezone_default(tmp_path: 
 
     settings = load_settings(config_path=config_path, env_path=env_path)
     assert settings.sessions.timezone == "America/New_York"
+
+
+def test_missing_symbol_market_mapping_rejected(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {
+        "universe": {
+            "symbols": ["SPY", "BTC/USD"],
+            "symbol_markets": {"SPY": "stocks"},
+        }
+    }
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="symbol_markets is missing entries"):
+        load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_missing_timeframe_anchor_key_rejected(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {"timeframes": {"anchors": {"1W": "W-FRI", "1M": "ME"}}}
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="anchors is missing required keys"):
+        load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_invalid_asof_date_rejected(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {"alpaca": {"asof": "20250101"}}
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="alpaca.asof must be valid YYYY-MM-DD"):
+        load_settings(config_path=config_path, env_path=env_path)

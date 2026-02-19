@@ -17,7 +17,7 @@ from sma_outfits.monitoring.progress import TerminalProgressBar, TerminalStatusL
 from sma_outfits.reporting.summary import build_summary_from_records, write_summary_report
 from sma_outfits.replay.engine import ReplayEngine
 from sma_outfits.runtime import assert_python_runtime
-from sma_outfits.utils import dedupe_keep_order, ensure_utc_timestamp, parse_csv
+from sma_outfits.utils import dedupe_keep_order, ensure_utc_timestamp, market_for_symbol, parse_csv
 
 app = typer.Typer(add_completion=False, help="SMA outfits Alpaca-only recreation CLI")
 
@@ -36,6 +36,11 @@ def _effective_timeframes(user_timeframes: str, settings: Settings) -> list[str]
     if not user_timeframes:
         return settings.all_timeframes
     return dedupe_keep_order(parse_csv(user_timeframes))
+
+
+def _validate_symbol_market_mappings(symbols: list[str], settings: Settings) -> None:
+    for symbol in symbols:
+        market_for_symbol(symbol, settings.universe.symbol_markets)
 
 
 @app.command("validate-config")
@@ -74,6 +79,7 @@ def backfill(
     settings = _load_runtime_settings(config)
     configure_logging()
     selected_symbols = _effective_symbols(symbols, settings)
+    _validate_symbol_market_mappings(selected_symbols, settings)
     selected_timeframes = _effective_timeframes(timeframes, settings)
     start_ts = ensure_utc_timestamp(start)
     end_ts = ensure_utc_timestamp(end)
@@ -128,6 +134,7 @@ def run_live(
     assert_python_runtime()
     settings = _load_runtime_settings(config)
     configure_logging()
+    _validate_symbol_market_mappings(settings.universe.symbols, settings)
     storage = StorageManager(Path(settings.storage_root))
     runner = LiveRunner(settings=settings, storage=storage)
     status_line = TerminalStatusLine(label="run-live", enabled=progress)
@@ -207,6 +214,7 @@ def replay(
     settings = _load_runtime_settings(config)
     configure_logging()
     selected_symbols = _effective_symbols(symbols, settings)
+    _validate_symbol_market_mappings(selected_symbols, settings)
     selected_timeframes = _effective_timeframes(timeframes, settings)
     start_ts = ensure_utc_timestamp(start)
     end_ts = ensure_utc_timestamp(end)

@@ -74,6 +74,7 @@ def test_live_pipeline_mocked_stream_reconnect_and_idempotency(
     live_settings.universe.symbols = ["SPY"]
     live_settings.timeframes.live = ["1m"]
     live_settings.archive.enabled = False
+    live_settings.sessions.regular_only = False
     live_settings.live.reconnect_base_delay_seconds = 0.01
     live_settings.live.reconnect_max_delay_seconds = 0.01
     live_settings.live.reconnect_max_attempts = 3
@@ -137,6 +138,7 @@ def test_live_pipeline_fails_fast_on_malformed_stream_payload(
     live_settings.universe.symbols = ["SPY"]
     live_settings.timeframes.live = ["1m"]
     live_settings.archive.enabled = False
+    live_settings.sessions.regular_only = False
     live_settings.live.reconnect_max_attempts = 1
 
     storage = StorageManager(Path(live_settings.storage_root))

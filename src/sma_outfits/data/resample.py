@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Mapping
+
 import pandas as pd
 
 from sma_outfits.utils import timeframe_to_pandas_rule
@@ -21,12 +23,13 @@ def resample_ohlcv(
     frame: pd.DataFrame,
     timeframe: str,
     timezone: str = "America/New_York",
+    anchors: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
     normalized = ensure_ohlcv_schema(frame)
     if timeframe == "1m":
         return normalized
 
-    rule = timeframe_to_pandas_rule(timeframe)
+    rule = timeframe_to_pandas_rule(timeframe, anchors=anchors)
     localized = normalized.set_index("ts").tz_convert(timezone)
     grouped = localized.resample(rule, label="right", closed="right")
     out = grouped.agg(

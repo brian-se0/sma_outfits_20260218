@@ -2,6 +2,9 @@ alpaca:
   base_url: https://paper-api.alpaca.markets
   data_url: https://data.alpaca.markets
   data_feed: iex
+  adjustment: raw
+  asof: "2025-01-01"
+  crypto_loc: us
 
 universe:
   symbols:
@@ -34,6 +37,30 @@ universe:
     NDX: QQQ
     DJI: DIA
     VIX: VIXY
+  symbol_markets:
+    SPY: stocks
+    QQQ: stocks
+    DIA: stocks
+    UPRO: stocks
+    TQQQ: stocks
+    SQQQ: stocks
+    UDOW: stocks
+    SDOW: stocks
+    SOXL: stocks
+    SOXS: stocks
+    SVIX: stocks
+    VIXY: stocks
+    XLF: stocks
+    JPM: stocks
+    NVDA: stocks
+    TSLA: stocks
+    AMD: stocks
+    GME: stocks
+    SMH: stocks
+    FAS: stocks
+    FAZ: stocks
+    BTC/USD: crypto
+    ETH/USD: crypto
 
 sessions:
   regular_only: true
@@ -43,6 +70,10 @@ sessions:
 timeframes:
   live: [1m, 2m, 3m, 5m, 10m, 15m, 20m, 30m, 1h, 2h, 4h, 1D]
   derived: [1W, 1M, 1Q]
+  anchors:
+    1W: W-FRI
+    1M: ME
+    1Q: QE
 
 signal:
   tolerance: 0.01
@@ -65,6 +96,9 @@ risk:
 archive:
   enabled: true
   root: artifacts
+
+ingest:
+  empty_source_policy: fail
 
 live:
   runtime_minutes: null

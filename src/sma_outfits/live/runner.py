@@ -36,7 +36,12 @@ from sma_outfits.reporting.summary import build_summary
 from sma_outfits.risk.manager import ManagedPosition, RiskManager
 from sma_outfits.signals.classifier import SignalClassifier
 from sma_outfits.signals.detector import StrikeDetector, load_outfits
-from sma_outfits.utils import is_crypto_symbol, is_regular_session
+from sma_outfits.utils import (
+    apply_regular_session_filter,
+    ensure_utc_timestamp,
+    is_regular_session,
+    market_for_symbol,
+)
 
 LiveStreamFactory = Callable[[str, list[str]], AsyncIterator[LiveBar]]
 LiveProgressCallback = Callable[[dict[str, Any]], None]
@@ -242,16 +247,19 @@ class LiveRunner:
         async with self._lock:
             self._bars_received += 1
             symbol = live_bar.symbol.upper()
+            symbol_market = market_for_symbol(symbol, self.settings.universe.symbol_markets)
             if (
                 self.settings.sessions.regular_only
                 and not self.settings.sessions.extended_enabled
-                and not is_crypto_symbol(symbol)
-                and not is_regular_session(
-                    live_bar.ts,
-                    timezone=self.settings.sessions.timezone,
-                )
+                and symbol_market == "stocks"
             ):
-                return
+                self._ensure_calendar_sessions_for_timestamp(live_bar.ts)
+                if not is_regular_session(
+                    live_bar.ts,
+                    session_windows=self._session_windows_by_date,
+                    timezone=self.settings.sessions.timezone,
+                ):
+                    return
 
             accepted = self._append_source_bar(symbol, live_bar)
             if not accepted:
@@ -353,6 +361,7 @@ class LiveRunner:
                 frame,
                 timeframe=timeframe,
                 timezone=self.settings.sessions.timezone,
+                anchors=self.settings.timeframes.anchors,
             )
             if resampled.empty:
                 return None
@@ -601,24 +610,32 @@ class LiveRunner:
         if start >= end:
             raise RuntimeError("Invalid live warmup range: start must be earlier than end")
 
+        if self.settings.sessions.regular_only and not self.settings.sessions.extended_enabled:
+            if any(
+                market_for_symbol(symbol, self.settings.universe.symbol_markets) == "stocks"
+                for symbol in symbols
+            ):
+                self._ensure_calendar_sessions_for_range(start=start, end=end)
+
         for symbol in symbols:
+            symbol_market = market_for_symbol(symbol, self.settings.universe.symbol_markets)
             fetched = self.rest_client.fetch_bars(
                 symbol=symbol,
                 start=start,
                 end=end,
                 timeframe="1m",
+                market=symbol_market,
             )
             if (
                 self.settings.sessions.regular_only
                 and not self.settings.sessions.extended_enabled
-                and not is_crypto_symbol(symbol)
+                and symbol_market == "stocks"
             ):
-                local = fetched.copy()
-                local["ts"] = pd.to_datetime(local["ts"], utc=True)
-                mask = local["ts"].map(
-                    lambda ts: is_regular_session(ts, timezone=self.settings.sessions.timezone)
+                fetched = apply_regular_session_filter(
+                    fetched,
+                    session_windows=self._session_windows_by_date,
+                    timezone=self.settings.sessions.timezone,
                 )
-                fetched = local.loc[mask].reset_index(drop=True)
 
             if fetched.empty:
                 raise RuntimeError(
@@ -641,6 +658,7 @@ class LiveRunner:
                         normalized,
                         timeframe=timeframe,
                         timezone=self.settings.sessions.timezone,
+                        anchors=self.settings.timeframes.anchors,
                     )
                 if frame.empty:
                     continue
@@ -700,15 +718,16 @@ class LiveRunner:
         )
         return stream.stream_bars()
 
-    @staticmethod
-    def _split_market_symbols(symbols: list[str]) -> list[tuple[str, list[str]]]:
-        stocks = [symbol for symbol in symbols if not is_crypto_symbol(symbol)]
-        crypto = [symbol for symbol in symbols if is_crypto_symbol(symbol)]
+    def _split_market_symbols(self, symbols: list[str]) -> list[tuple[str, list[str]]]:
+        groups_by_market: dict[str, list[str]] = {"stocks": [], "crypto": []}
+        for symbol in symbols:
+            market = market_for_symbol(symbol, self.settings.universe.symbol_markets)
+            groups_by_market[market].append(symbol)
         groups: list[tuple[str, list[str]]] = []
-        if stocks:
-            groups.append(("stocks", stocks))
-        if crypto:
-            groups.append(("crypto", crypto))
+        if groups_by_market["stocks"]:
+            groups.append(("stocks", groups_by_market["stocks"]))
+        if groups_by_market["crypto"]:
+            groups.append(("crypto", groups_by_market["crypto"]))
         return groups
 
     @staticmethod
@@ -732,6 +751,7 @@ class LiveRunner:
         self._active_positions_by_key: dict[tuple[str, str], list[ManagedPosition]] = {}
         self._proxy_prices: dict[str, float] = {}
         self._last_processed_ts: dict[tuple[str, str], pd.Timestamp] = {}
+        self._session_windows_by_date: dict[str, tuple[pd.Timestamp, pd.Timestamp] | None] = {}
 
         self._event_ids: dict[str, set[str]] = {
             "strikes": set(),
@@ -807,6 +827,26 @@ class LiveRunner:
                 for symbol, migration in self.settings.risk.migrations.items()
             },
         )
+
+    def _ensure_calendar_sessions_for_range(
+        self,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+    ) -> None:
+        sessions = self.rest_client.fetch_calendar_sessions(
+            start=start,
+            end=end,
+            timezone=self.settings.sessions.timezone,
+        )
+        self._session_windows_by_date.update(sessions)
+
+    def _ensure_calendar_sessions_for_timestamp(self, ts: pd.Timestamp) -> None:
+        date_key = ensure_utc_timestamp(ts).tz_convert(self.settings.sessions.timezone).strftime(
+            "%Y-%m-%d"
+        )
+        if date_key in self._session_windows_by_date:
+            return
+        self._ensure_calendar_sessions_for_range(start=ts, end=ts)
 
 
 def _empty_bar_frame() -> pd.DataFrame:

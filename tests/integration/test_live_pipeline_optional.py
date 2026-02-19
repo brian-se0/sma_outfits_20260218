@@ -17,6 +17,9 @@ def test_optional_alpaca_live_stream_one_hour() -> None:
 
     symbol = os.getenv("SMA_OUTFITS_LIVE_SYMBOL", "SPY").upper()
     timeframe = os.getenv("SMA_OUTFITS_LIVE_TIMEFRAME", "1m")
+    market = os.getenv("SMA_OUTFITS_LIVE_MARKET", "stocks").strip().lower()
+    if market not in {"stocks", "crypto"}:
+        raise ValueError("SMA_OUTFITS_LIVE_MARKET must be one of: stocks, crypto")
     config_path = Path(
         os.getenv("SMA_OUTFITS_LIVE_CONFIG", "configs/settings.example.yaml")
     )
@@ -24,6 +27,7 @@ def test_optional_alpaca_live_stream_one_hour() -> None:
     settings = load_settings(config_path=config_path, env_path=Path(".env.local"))
     live_settings = settings.model_copy(deep=True)
     live_settings.universe.symbols = [symbol]
+    live_settings.universe.symbol_markets[symbol] = market
     live_settings.timeframes.live = [timeframe]
     live_settings.archive.enabled = False
 

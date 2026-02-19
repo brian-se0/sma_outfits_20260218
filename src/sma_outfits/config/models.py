@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
+import re
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from sma_outfits.utils import SUPPORTED_TIMEFRAMES
 
@@ -42,6 +44,32 @@ DEFAULT_PROXY_MAP = {
     "VIX": "VIXY",
 }
 
+DEFAULT_SYMBOL_MARKETS = {
+    "SPY": "stocks",
+    "QQQ": "stocks",
+    "DIA": "stocks",
+    "UPRO": "stocks",
+    "TQQQ": "stocks",
+    "SQQQ": "stocks",
+    "UDOW": "stocks",
+    "SDOW": "stocks",
+    "SOXL": "stocks",
+    "SOXS": "stocks",
+    "SVIX": "stocks",
+    "VIXY": "stocks",
+    "XLF": "stocks",
+    "JPM": "stocks",
+    "NVDA": "stocks",
+    "TSLA": "stocks",
+    "AMD": "stocks",
+    "GME": "stocks",
+    "SMH": "stocks",
+    "FAS": "stocks",
+    "FAZ": "stocks",
+    "BTC/USD": "crypto",
+    "ETH/USD": "crypto",
+}
+
 DEFAULT_LIVE_TIMEFRAMES = [
     "1m",
     "2m",
@@ -58,6 +86,7 @@ DEFAULT_LIVE_TIMEFRAMES = [
 ]
 
 DEFAULT_DERIVED_TIMEFRAMES = ["1W", "1M", "1Q"]
+DEFAULT_RESAMPLE_ANCHORS = {"1W": "W-FRI", "1M": "ME", "1Q": "QE"}
 
 REQUIRED_ENV_KEYS = (
     "ALPACA_API_KEY",
@@ -76,13 +105,38 @@ class AlpacaConfig(BaseModel):
     base_url: str = "https://paper-api.alpaca.markets"
     data_url: str = "https://data.alpaca.markets"
     data_feed: str = "iex"
+    adjustment: str = "raw"
+    asof: str = "2025-01-01"
+    crypto_loc: str = "us"
 
-    @field_validator("api_key", "secret_key", "base_url", "data_url", "data_feed")
+    @field_validator(
+        "api_key",
+        "secret_key",
+        "base_url",
+        "data_url",
+        "data_feed",
+        "adjustment",
+        "crypto_loc",
+    )
     @classmethod
     def _non_empty(cls, value: str) -> str:
         candidate = value.strip()
         if not candidate:
             raise ValueError("value must be non-empty")
+        return candidate
+
+    @field_validator("asof")
+    @classmethod
+    def _validate_asof_date(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("alpaca.asof must be non-empty YYYY-MM-DD")
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", candidate) is None:
+            raise ValueError("alpaca.asof must be valid YYYY-MM-DD")
+        try:
+            date.fromisoformat(candidate)
+        except ValueError as exc:
+            raise ValueError("alpaca.asof must be valid YYYY-MM-DD") from exc
         return candidate
 
 
@@ -91,6 +145,9 @@ class UniverseConfig(BaseModel):
 
     symbols: list[str] = Field(default_factory=lambda: list(DEFAULT_SYMBOLS))
     proxy_map: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_PROXY_MAP))
+    symbol_markets: dict[str, Literal["stocks", "crypto"]] = Field(
+        default_factory=lambda: dict(DEFAULT_SYMBOL_MARKETS)
+    )
 
     @field_validator("symbols")
     @classmethod
@@ -104,6 +161,40 @@ class UniverseConfig(BaseModel):
                 raise ValueError("symbols cannot include empty values")
             cleaned.append(symbol)
         return cleaned
+
+    @field_validator("symbol_markets")
+    @classmethod
+    def _validate_symbol_markets(
+        cls,
+        values: dict[str, Literal["stocks", "crypto"]],
+    ) -> dict[str, Literal["stocks", "crypto"]]:
+        if not values:
+            raise ValueError("universe.symbol_markets cannot be empty")
+        normalized: dict[str, Literal["stocks", "crypto"]] = {}
+        for raw_symbol, raw_market in values.items():
+            symbol = str(raw_symbol).strip().upper()
+            if not symbol:
+                raise ValueError("universe.symbol_markets cannot include empty symbol keys")
+            market = str(raw_market).strip().lower()
+            if market not in {"stocks", "crypto"}:
+                raise ValueError(
+                    "universe.symbol_markets values must be one of: stocks, crypto"
+                )
+            if market == "stocks":
+                normalized[symbol] = "stocks"
+            else:
+                normalized[symbol] = "crypto"
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_symbol_market_coverage(self) -> UniverseConfig:
+        missing = [symbol for symbol in self.symbols if symbol not in self.symbol_markets]
+        if missing:
+            raise ValueError(
+                "universe.symbol_markets is missing entries for symbols: "
+                + ", ".join(sorted(missing))
+            )
+        return self
 
 
 class SessionsConfig(BaseModel):
@@ -119,6 +210,7 @@ class TimeframesConfig(BaseModel):
 
     live: list[str] = Field(default_factory=lambda: list(DEFAULT_LIVE_TIMEFRAMES))
     derived: list[str] = Field(default_factory=lambda: list(DEFAULT_DERIVED_TIMEFRAMES))
+    anchors: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_RESAMPLE_ANCHORS))
 
     @field_validator("live", "derived")
     @classmethod
@@ -134,6 +226,30 @@ class TimeframesConfig(BaseModel):
                 )
             out.append(candidate)
         return out
+
+    @field_validator("anchors")
+    @classmethod
+    def _validate_anchors(cls, values: dict[str, str]) -> dict[str, str]:
+        required = {"1W", "1M", "1Q"}
+        normalized: dict[str, str] = {}
+        for raw_timeframe, raw_rule in values.items():
+            timeframe = str(raw_timeframe).strip()
+            if timeframe not in required:
+                raise ValueError(
+                    "timeframes.anchors keys must be exactly: 1W, 1M, 1Q"
+                )
+            rule = str(raw_rule).strip()
+            if not rule:
+                raise ValueError(
+                    f"timeframes.anchors[{timeframe}] must be a non-empty pandas offset rule"
+                )
+            normalized[timeframe] = rule
+        missing = sorted(required.difference(normalized.keys()))
+        if missing:
+            raise ValueError(
+                "timeframes.anchors is missing required keys: " + ", ".join(missing)
+            )
+        return normalized
 
 
 class SignalConfig(BaseModel):
@@ -183,6 +299,12 @@ class ArchiveConfig(BaseModel):
 
     enabled: bool = True
     root: str = "artifacts"
+
+
+class IngestConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    empty_source_policy: Literal["fail"] = "fail"
 
 
 class LiveConfig(BaseModel):
@@ -246,6 +368,7 @@ class Settings(BaseModel):
     signal: SignalConfig = Field(default_factory=SignalConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     archive: ArchiveConfig = Field(default_factory=ArchiveConfig)
+    ingest: IngestConfig = Field(default_factory=IngestConfig)
     live: LiveConfig = Field(default_factory=LiveConfig)
     storage_root: str = "artifacts/storage"
     events_root: str = "artifacts/events"

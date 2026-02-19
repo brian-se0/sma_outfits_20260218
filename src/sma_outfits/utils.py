@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import time
-from typing import Iterable
+from typing import Iterable, Mapping
 
 import pandas as pd
 
@@ -24,7 +23,7 @@ SUPPORTED_TIMEFRAMES = (
     "1Q",
 )
 
-TIMEFRAME_TO_PANDAS_RULE = {
+BASE_TIMEFRAME_TO_PANDAS_RULE = {
     "1m": "1min",
     "2m": "2min",
     "3m": "3min",
@@ -37,6 +36,9 @@ TIMEFRAME_TO_PANDAS_RULE = {
     "2h": "2h",
     "4h": "4h",
     "1D": "1D",
+}
+
+DEFAULT_PERIOD_ANCHORS = {
     "1W": "W-FRI",
     "1M": "ME",
     "1Q": "QE",
@@ -50,6 +52,8 @@ ALPACA_NATIVE_TIMEFRAMES = {
     "1h": "1Hour",
     "1D": "1Day",
 }
+
+ALLOWED_MARKETS = frozenset({"stocks", "crypto"})
 
 
 def stable_id(*parts: str) -> str:
@@ -73,9 +77,26 @@ def normalize_timeframe(value: str) -> str:
     return candidate
 
 
-def timeframe_to_pandas_rule(value: str) -> str:
+def timeframe_to_pandas_rule(
+    value: str,
+    anchors: Mapping[str, str] | None = None,
+) -> str:
     timeframe = normalize_timeframe(value)
-    return TIMEFRAME_TO_PANDAS_RULE[timeframe]
+    if timeframe in BASE_TIMEFRAME_TO_PANDAS_RULE:
+        return BASE_TIMEFRAME_TO_PANDAS_RULE[timeframe]
+    if timeframe not in DEFAULT_PERIOD_ANCHORS:
+        raise ValueError(f"Unsupported timeframe for pandas rule mapping: {timeframe}")
+
+    candidate_anchors = anchors if anchors is not None else DEFAULT_PERIOD_ANCHORS
+    if timeframe not in candidate_anchors:
+        raise ValueError(
+            f"Missing anchor rule for timeframe '{timeframe}'. "
+            f"Required keys: {tuple(DEFAULT_PERIOD_ANCHORS.keys())}"
+        )
+    rule = str(candidate_anchors[timeframe]).strip()
+    if not rule:
+        raise ValueError(f"Anchor rule for timeframe '{timeframe}' must be non-empty")
+    return rule
 
 
 def parse_csv(value: str | None) -> list[str]:
@@ -98,24 +119,64 @@ def is_crypto_symbol(symbol: str) -> bool:
     return "/" in symbol
 
 
+def normalize_market(value: str) -> str:
+    market = value.strip().lower()
+    if market not in ALLOWED_MARKETS:
+        raise ValueError(
+            f"Unsupported market '{value}'. Allowed values: {sorted(ALLOWED_MARKETS)}"
+        )
+    return market
+
+
+def market_for_symbol(
+    symbol: str,
+    symbol_markets: Mapping[str, str],
+) -> str:
+    normalized_symbol = symbol.strip().upper()
+    if not normalized_symbol:
+        raise ValueError("symbol cannot be empty")
+    if normalized_symbol not in symbol_markets:
+        raise ValueError(
+            f"No configured market mapping for symbol '{normalized_symbol}'. "
+            "Add universe.symbol_markets entry."
+        )
+    return normalize_market(str(symbol_markets[normalized_symbol]))
+
+
 def is_regular_session(
     ts: pd.Timestamp,
+    session_windows: Mapping[str, tuple[pd.Timestamp, pd.Timestamp] | None],
     timezone: str = "America/New_York",
 ) -> bool:
-    local = ensure_utc_timestamp(ts).tz_convert(timezone)
-    if local.weekday() >= 5:
+    ts_utc = ensure_utc_timestamp(ts)
+    local_date_key = ts_utc.tz_convert(timezone).strftime("%Y-%m-%d")
+    session_window = session_windows.get(local_date_key)
+    if session_window is None:
         return False
-    local_time = local.time()
-    return time(9, 30) <= local_time <= time(16, 0)
+    market_open_utc = ensure_utc_timestamp(session_window[0])
+    market_close_utc = ensure_utc_timestamp(session_window[1])
+    if market_close_utc < market_open_utc:
+        raise ValueError(
+            f"Invalid session window for {local_date_key}: "
+            f"close={market_close_utc.isoformat()} before open={market_open_utc.isoformat()}"
+        )
+    return market_open_utc <= ts_utc <= market_close_utc
 
 
 def apply_regular_session_filter(
     frame: pd.DataFrame,
+    session_windows: Mapping[str, tuple[pd.Timestamp, pd.Timestamp] | None],
     timezone: str = "America/New_York",
 ) -> pd.DataFrame:
     if frame.empty:
         return frame.copy()
     out = frame.copy()
     out["ts"] = pd.to_datetime(out["ts"], utc=True)
-    mask = out["ts"].map(lambda ts: is_regular_session(pd.Timestamp(ts), timezone))
+    mask = out["ts"].map(
+        lambda ts: is_regular_session(
+            pd.Timestamp(ts),
+            session_windows=session_windows,
+            timezone=timezone,
+        )
+    )
     return out.loc[mask].reset_index(drop=True)

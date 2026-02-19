@@ -14,7 +14,7 @@ from websockets.exceptions import ConnectionClosed
 
 from sma_outfits.config.models import AlpacaConfig
 from sma_outfits.data.resample import ensure_ohlcv_schema
-from sma_outfits.utils import ALPACA_NATIVE_TIMEFRAMES, is_crypto_symbol
+from sma_outfits.utils import ALPACA_NATIVE_TIMEFRAMES, ensure_utc_timestamp, normalize_market
 
 
 class HistoricalBarsClient(Protocol):
@@ -24,7 +24,16 @@ class HistoricalBarsClient(Protocol):
         start: pd.Timestamp,
         end: pd.Timestamp,
         timeframe: str,
+        market: str,
     ) -> pd.DataFrame:
+        ...
+
+    def fetch_calendar_sessions(
+        self,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        timezone: str = "America/New_York",
+    ) -> dict[str, tuple[pd.Timestamp, pd.Timestamp] | None]:
         ...
 
 
@@ -86,14 +95,16 @@ class AlpacaRESTClient:
         start: pd.Timestamp,
         end: pd.Timestamp,
         timeframe: str,
+        market: str,
     ) -> pd.DataFrame:
         if timeframe not in ALPACA_NATIVE_TIMEFRAMES:
             raise ValueError(
                 f"Timeframe '{timeframe}' is not a native Alpaca timeframe. "
                 "Fetch native bars and resample instead."
             )
+        normalized_market = normalize_market(market)
         native_tf = ALPACA_NATIVE_TIMEFRAMES[timeframe]
-        if is_crypto_symbol(symbol):
+        if normalized_market == "crypto":
             return self._fetch_crypto_bars(symbol, start, end, native_tf)
         return self._fetch_stock_bars(symbol, start, end, native_tf)
 
@@ -110,7 +121,8 @@ class AlpacaRESTClient:
             "timeframe": native_tf,
             "start": start.tz_convert("UTC").isoformat().replace("+00:00", "Z"),
             "end": end.tz_convert("UTC").isoformat().replace("+00:00", "Z"),
-            "adjustment": "raw",
+            "adjustment": self.config.adjustment,
+            "asof": self.config.asof,
             "feed": self.config.data_feed,
             "limit": 10000,
         }
@@ -135,7 +147,9 @@ class AlpacaRESTClient:
         end: pd.Timestamp,
         native_tf: str,
     ) -> pd.DataFrame:
-        endpoint = f"{self.config.data_url.rstrip('/')}/v1beta3/crypto/us/bars"
+        endpoint = (
+            f"{self.config.data_url.rstrip('/')}/v1beta3/crypto/{self.config.crypto_loc}/bars"
+        )
         params = {
             "symbols": symbol,
             "timeframe": native_tf,
@@ -156,6 +170,78 @@ class AlpacaRESTClient:
         return ensure_ohlcv_schema(
             _rows_to_dataframe(rows, endpoint=endpoint, symbol=symbol)
         )
+
+    def fetch_calendar_sessions(
+        self,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        timezone: str = "America/New_York",
+    ) -> dict[str, tuple[pd.Timestamp, pd.Timestamp] | None]:
+        start_utc = ensure_utc_timestamp(start)
+        end_utc = ensure_utc_timestamp(end)
+        if start_utc > end_utc:
+            raise ValueError("start must be earlier than or equal to end for calendar lookup")
+
+        local_start = start_utc.tz_convert(timezone).strftime("%Y-%m-%d")
+        local_end = end_utc.tz_convert(timezone).strftime("%Y-%m-%d")
+        endpoint = f"{self.config.base_url.rstrip('/')}/v2/calendar"
+        response = self._session.get(
+            endpoint,
+            params={"start": local_start, "end": local_end},
+            timeout=self.timeout_seconds,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Alpaca request failed ({response.status_code}) for {endpoint}: {response.text}"
+            )
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise RuntimeError(
+                f"Unexpected Alpaca calendar payload type: {type(payload).__name__} (expected list)"
+            )
+
+        sessions: dict[str, tuple[pd.Timestamp, pd.Timestamp] | None] = {}
+        for index, row in enumerate(payload):
+            if not isinstance(row, dict):
+                raise RuntimeError(
+                    f"Alpaca calendar payload contract violation ({endpoint}): "
+                    f"row[{index}] type={type(row).__name__} (expected dict)"
+                )
+            missing = {"date", "open", "close"}.difference(row.keys())
+            if missing:
+                raise RuntimeError(
+                    f"Alpaca calendar payload contract violation ({endpoint}): "
+                    f"row[{index}] missing={sorted(missing)}"
+                )
+            session_date = _coerce_non_empty_string(
+                row["date"],
+                context=f"{endpoint} row[{index}] field=date",
+                error_cls=RuntimeError,
+            )
+            market_open_utc = _parse_calendar_clock_timestamp(
+                session_date=session_date,
+                value=row["open"],
+                timezone=timezone,
+                context=f"{endpoint} row[{index}] field=open",
+            )
+            market_close_utc = _parse_calendar_clock_timestamp(
+                session_date=session_date,
+                value=row["close"],
+                timezone=timezone,
+                context=f"{endpoint} row[{index}] field=close",
+            )
+            if market_close_utc < market_open_utc:
+                raise RuntimeError(
+                    f"Alpaca calendar payload contract violation ({endpoint}): "
+                    f"row[{index}] close before open for date={session_date}"
+                )
+            sessions[session_date] = (market_open_utc, market_close_utc)
+
+        for day in pd.date_range(start=local_start, end=local_end, freq="D"):
+            day_key = day.strftime("%Y-%m-%d")
+            if day_key not in sessions:
+                sessions[day_key] = None
+        return sessions
 
     def _get_json(self, endpoint: str, params: dict[str, str | int]) -> dict:
         response = self._session.get(
@@ -339,7 +425,7 @@ class AlpacaWebSocketBarStream:
         scheme = "wss" if parsed.scheme == "https" else "ws"
         if self.market == "stocks":
             return f"{scheme}://{host}/v2/{self.config.data_feed}"
-        return f"{scheme}://{host}/v1beta3/crypto/us"
+        return f"{scheme}://{host}/v1beta3/crypto/{self.config.crypto_loc}"
 
 
 class InMemoryHistoricalClient:
@@ -354,7 +440,9 @@ class InMemoryHistoricalClient:
         start: pd.Timestamp,
         end: pd.Timestamp,
         timeframe: str,
+        market: str,
     ) -> pd.DataFrame:
+        normalize_market(market)
         key = (symbol, timeframe)
         if key not in self._frames:
             raise KeyError(f"No in-memory bars for {symbol} {timeframe}")
@@ -363,6 +451,31 @@ class InMemoryHistoricalClient:
         if frame.empty:
             raise RuntimeError(f"No in-range bars for {symbol} {timeframe}")
         return frame.reset_index(drop=True)
+
+    def fetch_calendar_sessions(
+        self,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        timezone: str = "America/New_York",
+    ) -> dict[str, tuple[pd.Timestamp, pd.Timestamp] | None]:
+        start_utc = ensure_utc_timestamp(start)
+        end_utc = ensure_utc_timestamp(end)
+        if start_utc > end_utc:
+            raise ValueError("start must be earlier than or equal to end for calendar lookup")
+        local_start = start_utc.tz_convert(timezone).strftime("%Y-%m-%d")
+        local_end = end_utc.tz_convert(timezone).strftime("%Y-%m-%d")
+        sessions: dict[str, tuple[pd.Timestamp, pd.Timestamp] | None] = {}
+        for day in pd.date_range(start=local_start, end=local_end, freq="D"):
+            if day.weekday() >= 5:
+                sessions[day.strftime("%Y-%m-%d")] = None
+                continue
+            market_open = day.tz_localize(timezone).replace(hour=9, minute=30, second=0)
+            market_close = day.tz_localize(timezone).replace(hour=16, minute=0, second=0)
+            sessions[day.strftime("%Y-%m-%d")] = (
+                market_open.tz_convert("UTC"),
+                market_close.tz_convert("UTC"),
+            )
+        return sessions
 
 
 def _rows_to_dataframe(
@@ -495,6 +608,8 @@ def _extract_rest_symbol_rows(
             f"Alpaca REST payload contract violation ({endpoint}, {symbol}): "
             f"'bars' must be dict[symbol, list], got {type(bars_data).__name__}"
         )
+    if not bars_data:
+        return []
     if symbol not in bars_data:
         raise RuntimeError(
             f"Alpaca REST payload contract violation ({endpoint}, {symbol}): "
@@ -557,6 +672,42 @@ def _coerce_float(
         return float(value)
     except Exception as exc:  # noqa: BLE001
         raise error_cls(f"{context}: expected numeric value, got {value!r}") from exc
+
+
+def _coerce_non_empty_string(
+    value: object,
+    context: str,
+    error_cls: type[Exception],
+) -> str:
+    candidate = str(value).strip()
+    if not candidate:
+        raise error_cls(f"{context}: expected non-empty string, got {value!r}")
+    return candidate
+
+
+def _parse_calendar_clock_timestamp(
+    session_date: str,
+    value: object,
+    timezone: str,
+    context: str,
+) -> pd.Timestamp:
+    clock_value = _coerce_non_empty_string(
+        value=value,
+        context=context,
+        error_cls=RuntimeError,
+    )
+    normalized_clock = clock_value if len(clock_value) != 5 else f"{clock_value}:00"
+    try:
+        local_ts = pd.Timestamp(f"{session_date} {normalized_clock}")
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f"{context}: invalid session time value={value!r} for date={session_date}"
+        ) from exc
+    if local_ts.tzinfo is None:
+        local_ts = local_ts.tz_localize(timezone)
+    else:
+        local_ts = local_ts.tz_convert(timezone)
+    return local_ts.tz_convert("UTC")
 
 
 def _require_ws_message_type(row: dict[str, object], phase: str) -> str:
