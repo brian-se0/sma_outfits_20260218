@@ -55,7 +55,18 @@ class StorageManager:
                     .drop_duplicates(subset=["ts"])
                     .reset_index(drop=True)
                 )
-            next_chunk.to_parquet(path, index=False)
+            try:
+                next_chunk.to_parquet(path, index=False)
+            except OSError as exc:
+                raise RuntimeError(
+                    "Failed to write parquet partition '{}'. "
+                    "Underlying OS error: {}. "
+                    "This can indicate a corrupted partition directory. "
+                    "Remove the affected date partition directory and rerun backfill.".format(
+                        path,
+                        exc,
+                    )
+                ) from exc
             written += len(next_chunk)
         return written
 

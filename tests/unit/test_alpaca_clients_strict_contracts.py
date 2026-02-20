@@ -276,6 +276,72 @@ def test_calendar_request_uses_single_v2_prefix() -> None:
     assert str(args[0]) == "https://paper-api.alpaca.markets/v2/calendar"
 
 
+def test_discover_earliest_bar_frame_uses_limit_one_and_ascending_sort() -> None:
+    client = AlpacaRESTClient(_config())
+    fake_session = _FakeSession(
+        responses=[
+            _FakeResponse(
+                payload={
+                    "bars": {
+                        "SPY": [
+                            {
+                                "t": "2024-09-04T13:30:00Z",
+                                "o": 100.0,
+                                "h": 101.0,
+                                "l": 99.0,
+                                "c": 100.5,
+                                "v": 1000.0,
+                            }
+                        ]
+                    },
+                    "next_page_token": None,
+                }
+            )
+        ]
+    )
+    client._session = fake_session
+
+    frame = client.discover_earliest_bar_frame(
+        symbol="SPY",
+        timeframe="1m",
+        market="stocks",
+        start=pd.Timestamp("2024-01-01T00:00:00Z"),
+        end=pd.Timestamp("2025-01-01T00:00:00Z"),
+    )
+
+    assert len(frame) == 1
+    assert frame.iloc[0]["ts"] == pd.Timestamp("2024-09-04T13:30:00Z")
+    assert fake_session.call_args
+    _, kwargs = fake_session.call_args[0]
+    params = kwargs.get("params")
+    assert isinstance(params, dict)
+    assert params.get("limit") == 1
+    assert params.get("sort") == "asc"
+
+
+def test_discover_earliest_bar_frame_fails_when_no_rows_found() -> None:
+    client = AlpacaRESTClient(_config())
+    client._session = _FakeSession(
+        responses=[
+            _FakeResponse(
+                payload={
+                    "bars": {},
+                    "next_page_token": None,
+                }
+            )
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="No Alpaca bars returned for SPY"):
+        client.discover_earliest_bar_frame(
+            symbol="SPY",
+            timeframe="1m",
+            market="stocks",
+            start=pd.Timestamp("2024-01-01T00:00:00Z"),
+            end=pd.Timestamp("2025-01-01T00:00:00Z"),
+        )
+
+
 def test_rejects_single_object_websocket_payload() -> None:
     stream = AlpacaWebSocketBarStream(
         config=_config(),

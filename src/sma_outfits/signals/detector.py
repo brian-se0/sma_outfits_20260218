@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from statistics import median
+from typing import Callable
 
 import pandas as pd
 import yaml
@@ -219,6 +220,7 @@ class StrikeDetector:
         sma_states: dict[int, SMAState],
         history: pd.DataFrame,
         session_type: str = "regular",
+        cross_context_lookup: Callable[[str, datetime], RouteBarContext | None] | None = None,
     ) -> tuple[list[StrikeEvent], list[SignalEvent]]:
         context = self.build_route_context(bar=bar, sma_states=sma_states)
         if context is None:
@@ -233,6 +235,12 @@ class StrikeDetector:
             route=context.route,
             sma_states=sma_states,
             history=history,
+        ):
+            return [], []
+        if not self._passes_cross_symbol_context(
+            bar=bar,
+            context=context,
+            cross_context_lookup=cross_context_lookup,
         ):
             return [], []
 
@@ -360,6 +368,30 @@ class StrikeDetector:
         volume_baseline = float(median(volume_values))
         threshold = volume_baseline * confluence.volume_spike_ratio
         return float(bar.volume) >= threshold
+
+    @staticmethod
+    def _passes_cross_symbol_context(
+        *,
+        bar: BarEvent,
+        context: RouteBarContext,
+        cross_context_lookup: Callable[[str, datetime], RouteBarContext | None] | None,
+    ) -> bool:
+        cross_context = context.route.cross_symbol_context
+        if not cross_context.enabled:
+            return True
+        if cross_context_lookup is None:
+            raise RuntimeError(
+                "cross_symbol_context is enabled but no cross_context_lookup callback was supplied"
+            )
+        for rule in cross_context.rules:
+            reference_context = cross_context_lookup(rule.reference_route_id, bar.ts)
+            if reference_context is None:
+                return False
+            if reference_context.macro_positive != rule.require_macro_positive:
+                return False
+            if reference_context.micro_positive != rule.require_micro_positive:
+                return False
+        return True
 
     @staticmethod
     def _macro_positive(

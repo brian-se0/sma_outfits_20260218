@@ -110,6 +110,64 @@ class AlpacaRESTClient:
             return self._fetch_crypto_bars(symbol, start, end, native_tf)
         return self._fetch_stock_bars(symbol, start, end, native_tf)
 
+    def discover_earliest_bar_frame(
+        self,
+        symbol: str,
+        timeframe: str,
+        market: str,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+    ) -> pd.DataFrame:
+        if timeframe not in ALPACA_NATIVE_TIMEFRAMES:
+            raise ValueError(
+                f"Timeframe '{timeframe}' is not a native Alpaca timeframe. "
+                "Use native source timeframe discovery."
+            )
+        if ensure_utc_timestamp(start) >= ensure_utc_timestamp(end):
+            raise ValueError("start must be earlier than end for earliest-bar discovery")
+
+        normalized_market = normalize_market(market)
+        native_tf = ALPACA_NATIVE_TIMEFRAMES[timeframe]
+        if normalized_market == "crypto":
+            endpoint = (
+                f"{self.config.data_url.rstrip('/')}/v1beta3/crypto/{self.config.crypto_loc}/bars"
+            )
+            params: dict[str, str | int] = {
+                "symbols": symbol,
+                "timeframe": native_tf,
+                "start": ensure_utc_timestamp(start).isoformat().replace("+00:00", "Z"),
+                "end": ensure_utc_timestamp(end).isoformat().replace("+00:00", "Z"),
+                "limit": 1,
+                "sort": "asc",
+            }
+        else:
+            endpoint = f"{self.config.data_url.rstrip('/')}/v2/stocks/bars"
+            params = {
+                "symbols": symbol,
+                "timeframe": native_tf,
+                "start": ensure_utc_timestamp(start).isoformat().replace("+00:00", "Z"),
+                "end": ensure_utc_timestamp(end).isoformat().replace("+00:00", "Z"),
+                "adjustment": self.config.adjustment,
+                "asof": self.config.asof,
+                "feed": self.config.data_feed,
+                "limit": 1,
+                "sort": "asc",
+            }
+
+        payload = self._get_json(endpoint, params)
+        rows = _extract_rest_symbol_rows(payload, endpoint=endpoint, symbol=symbol)
+        if not rows:
+            raise RuntimeError(
+                f"No Alpaca bars returned for {symbol} ({native_tf}) in discovery window "
+                f"{ensure_utc_timestamp(start).isoformat()} to {ensure_utc_timestamp(end).isoformat()}"
+            )
+        frame = ensure_ohlcv_schema(
+            _rows_to_dataframe(rows, endpoint=endpoint, symbol=symbol)
+        )
+        if frame.empty:
+            raise RuntimeError(f"No Alpaca bars returned for {symbol} ({native_tf})")
+        return frame.iloc[[0]].reset_index(drop=True)
+
     def _fetch_stock_bars(
         self,
         symbol: str,

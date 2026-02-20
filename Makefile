@@ -10,6 +10,7 @@ CONFIG ?= configs/settings.example.yaml
 #   make e2e
 #   make e2e PROFILE=week SYMBOLS=SPY
 #   make e2e PROFILE=max UNIVERSE=all TIMEFRAME_SET=all
+#   make e2e PROFILE=max UNIVERSE=all_stocks TIMEFRAME_SET=all
 #   make e2e PROFILE=month UNIVERSE=core_expanded TIMEFRAME_SET=core
 #   make e2e PROFILE=custom START=2025-01-02T14:30:00Z END=2025-01-31T21:00:00Z
 #   make e2e PROFILE=month WARMUP_DAYS=150
@@ -20,6 +21,7 @@ TIMEFRAME_SET ?= core
 STAGES ?= validate-config,backfill,replay,report
 FEATURES ?=
 CORE_EXPANDED_SYMBOLS := QQQ,RWM,SVIX,SQQQ,TQQQ,IWM,XLF,SOXL,SPY,UPRO,VIXY
+ALL_STOCK_SYMBOLS := AAPL,AMDL,CONL,DUST,ETHU,IYR,MUU,NVD,NVDX,SPXU,SPY,QQQ,DIA,TNA,UPRO,TQQQ,TSLL,TSLT,TZA,SQQQ,UDOW,SDOW,SOXL,SOXS,SVIX,VIXY,XLF,JPM,NVDA,TSLA,AMD,GME,RWM,IWM,SMH,FAS,FAZ
 
 comma := ,
 empty :=
@@ -45,15 +47,20 @@ $(error Unsupported FEATURES value(s): $(INVALID_FEATURES). Allowed: $(VALID_FEA
 endif
 ifneq ($(strip $(FEATURES_NORMALIZED)),)
 ifneq ($(findstring $(comma)cross_symbol_context$(comma),$(FEATURES_CSV)),)
-$(error FEATURES includes cross_symbol_context, but this feature is not implemented yet in CLI/replay. Remove FEATURES or implement feature-gating first)
+$(error FEATURES includes cross_symbol_context, but this is not implemented as a runtime flag; use config-driven route.cross_symbol_context instead)
 endif
 endif
 
 # Storage safety guard for larger e2e profiles.
 MIN_FREE_GB ?= 50
 
-MAX_START ?= 2025-01-01T00:00:00Z
+MAX_START ?= 2016-01-01T00:00:00Z
 MAX_END ?= $(shell powershell -NoProfile -Command "[Console]::Out.Write((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))")
+DISCOVER_START ?= 2000-01-01T00:00:00Z
+DISCOVER_RANGE_OUTPUT ?= artifacts/readiness/discovered_range_manifest.json
+READINESS_ACCEPTANCE_OUTPUT ?= artifacts/readiness/readiness_acceptance.json
+READINESS_END ?= $(MAX_END)
+FULL_RANGE_START ?= $(shell powershell -NoProfile -Command "if (Test-Path '$(DISCOVER_RANGE_OUTPUT)') { $$payload = Get-Content -Path '$(DISCOVER_RANGE_OUTPUT)' -Raw | ConvertFrom-Json; if ($$null -ne $$payload.full_range_start) { [Console]::Out.Write([string]$$payload.full_range_start) } }")
 
 ifeq ($(PROFILE),smoke)
 PROFILE_START := 2025-01-02T14:30:00Z
@@ -87,10 +94,12 @@ ifeq ($(UNIVERSE),core)
 PROFILE_SYMBOLS := QQQ,RWM
 else ifeq ($(UNIVERSE),core_expanded)
 PROFILE_SYMBOLS := $(CORE_EXPANDED_SYMBOLS)
+else ifeq ($(UNIVERSE),all_stocks)
+PROFILE_SYMBOLS := $(ALL_STOCK_SYMBOLS)
 else ifeq ($(UNIVERSE),all)
 PROFILE_SYMBOLS :=
 else
-$(error Unsupported UNIVERSE='$(UNIVERSE)'. Use: core, core_expanded, all)
+$(error Unsupported UNIVERSE='$(UNIVERSE)'. Use: core, core_expanded, all_stocks, all)
 endif
 
 ifeq ($(TIMEFRAME_SET),core)
@@ -131,18 +140,16 @@ REPORT_ATTRIBUTION_ARG := $(if $(strip $(REPORT_ATTRIBUTION)),--attribution $(RE
 E2E_REPORT_RANGE_ARG := $(if $(strip $(REPORT_RANGE_FOR_E2E)),--range $(REPORT_RANGE_FOR_E2E),)
 E2E_REPORT_ATTRIBUTION_ARG := $(if $(strip $(REPORT_ATTRIBUTION)),--attribution $(REPORT_ATTRIBUTION),)
 
-.PHONY: help venv install check-python validate-config test backfill replay run-live report preflight-storage e2e clean clean-all
+.PHONY: help venv install validate-config discover-range verify-readiness test backfill replay run-live report preflight-storage e2e clean clean-all
 
 help:
-	powershell -NoProfile -Command "Write-Output 'Targets:'; Write-Output '  make validate-config'; Write-Output '  make test'; Write-Output '  make backfill'; Write-Output '  make replay'; Write-Output '  make run-live'; Write-Output '  make report'; Write-Output '  make e2e'; Write-Output '  make clean'; Write-Output '  make clean-all'; Write-Output ''; Write-Output 'Common variables:'; Write-Output '  CONFIG=...'; Write-Output '  PROFILE=smoke|day|week|month|max|custom'; Write-Output '  UNIVERSE=core|core_expanded|all'; Write-Output '  START=... END=... (required when PROFILE=custom)'; Write-Output '  SYMBOLS=CSV'; Write-Output '  TIMEFRAMES=CSV'; Write-Output '  STAGES=validate-config,backfill,replay,report'; Write-Output '  FEATURES=cross_symbol_context (reserved; currently rejected until implemented)'; Write-Output '  ANALYSIS_START=... ANALYSIS_END=... WARMUP_DAYS=...'; Write-Output '  REPORT_RANGE=start,end REPORT_ATTRIBUTION=strike|close|both'; Write-Output ''; Write-Output 'Examples:'; Write-Output '  make e2e PROFILE=month SYMBOLS=QQQ,RWM TIMEFRAME_SET=core'; Write-Output '  make e2e PROFILE=month UNIVERSE=core_expanded TIMEFRAME_SET=core'; Write-Output '  make e2e PROFILE=custom START=2024-09-04T14:30:00Z END=2025-01-31T21:00:00Z STAGES=backfill,replay,report'; Write-Output '  make report REPORT_RANGE=2024-09-04T14:30:00Z,2025-01-31T21:00:00Z REPORT_ATTRIBUTION=both'"
+	powershell -NoProfile -Command "Write-Output 'Targets:'; Write-Output '  make validate-config'; Write-Output '  make discover-range'; Write-Output '  make verify-readiness'; Write-Output '  make test'; Write-Output '  make backfill'; Write-Output '  make replay'; Write-Output '  make run-live'; Write-Output '  make report'; Write-Output '  make e2e'; Write-Output '  make clean'; Write-Output '  make clean-all'; Write-Output ''; Write-Output 'Common variables:'; Write-Output '  CONFIG=...'; Write-Output '  PROFILE=smoke|day|week|month|max|custom'; Write-Output '  UNIVERSE=core|core_expanded|all_stocks|all'; Write-Output '  START=... END=... (required when PROFILE=custom)'; Write-Output '  SYMBOLS=CSV'; Write-Output '  TIMEFRAMES=CSV'; Write-Output '  STAGES=validate-config,backfill,replay,report'; Write-Output '  FEATURES=cross_symbol_context (rejected; not a runtime flag, use config route.cross_symbol_context)'; Write-Output '  DISCOVER_RANGE_OUTPUT=...'; Write-Output '  FULL_RANGE_START=... READINESS_END=...'; Write-Output '  ANALYSIS_START=... ANALYSIS_END=... WARMUP_DAYS=...'; Write-Output '  REPORT_RANGE=start,end REPORT_ATTRIBUTION=strike|close|both'; Write-Output ''; Write-Output 'Examples:'; Write-Output '  make discover-range CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml UNIVERSE=all_stocks TIMEFRAME_SET=all'; Write-Output '  make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all STAGES=validate-config,backfill'; Write-Output '  make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all TIMEFRAME_SET=all STAGES=replay,report'; Write-Output '  make verify-readiness CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all'"
 
 venv:
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; if (!(Test-Path '$(PYTHON)')) { py -3.14 -m venv $(VENV) }; if (!(Test-Path '$(VENV)\\Scripts\\pip.exe')) { & '$(PYTHON)' -m ensurepip --upgrade --default-pip }"
 	$(PYTHON) -c "import sys; assert sys.version_info[:3] == (3, 14, 3), f'Python 3.14.3 required, got {sys.version.split()[0]}'"
 
-check-python: venv
-
-$(INSTALL_STAMP): pyproject.toml Makefile | check-python
+$(INSTALL_STAMP): pyproject.toml Makefile | venv
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; & '$(PYTHON)' -m pip install --upgrade pip; & '$(PYTHON)' -m pip install -e .[dev]"
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(VENV)' | Out-Null; Set-Content -Path '$(INSTALL_STAMP)' -Value (Get-Date -Format o)"
 
@@ -150,6 +157,12 @@ install: $(INSTALL_STAMP)
 
 validate-config: install
 	$(PYTHON) -m sma_outfits.cli validate-config --config $(CONFIG)
+
+discover-range: install
+	$(PYTHON) -m sma_outfits.cli discover-range --config $(CONFIG) $(BACKFILL_SYMBOLS_ARG) $(BACKFILL_TIMEFRAMES_ARG) --output $(DISCOVER_RANGE_OUTPUT) --start $(DISCOVER_START) --end $(READINESS_END)
+
+verify-readiness: install
+	$(PYTHON) -m sma_outfits.cli verify-readiness --config $(CONFIG) --start $(START) --end $(END) $(BACKFILL_SYMBOLS_ARG) $(BACKFILL_TIMEFRAMES_ARG) --output $(READINESS_ACCEPTANCE_OUTPUT)
 
 test: install
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp\\pytest' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; & '$(PYTHON)' -m pytest"

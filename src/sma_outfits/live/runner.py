@@ -107,6 +107,7 @@ class LiveRunner:
             timeframes=selected_timeframes,
         )
         self._enforce_live_risk_mode_support(execution_pairs)
+        self._enforce_live_cross_symbol_context_support(execution_pairs)
         self._timeframes_by_symbol = _timeframes_by_symbol(execution_pairs)
         selected_symbols = list(self._timeframes_by_symbol.keys())
         effective_runtime = (
@@ -926,6 +927,24 @@ class LiveRunner:
             raise RuntimeError(
                 "run-live supports replay-only risk_mode violation: "
                 "atr_dynamic_stop is replay-only in v1. "
+                "Offending routes: " + ", ".join(sorted(unsupported_routes))
+            )
+
+    def _enforce_live_cross_symbol_context_support(
+        self,
+        execution_pairs: list[tuple[str, str]],
+    ) -> None:
+        selected_pairs = set(execution_pairs)
+        unsupported_routes = [
+            route.id
+            for route in self.settings.strategy.routes
+            if route.cross_symbol_context.enabled
+            and (route.symbol, route.timeframe) in selected_pairs
+        ]
+        if unsupported_routes:
+            raise RuntimeError(
+                "run-live supports replay-only cross_symbol_context violation: "
+                "cross_symbol_context is replay-only in v1. "
                 "Offending routes: " + ", ".join(sorted(unsupported_routes))
             )
 

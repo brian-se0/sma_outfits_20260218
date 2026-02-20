@@ -378,6 +378,37 @@ class RouteATRConfig(BaseModel):
         return value
 
 
+class CrossSymbolRuleConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reference_route_id: str
+    require_macro_positive: bool
+    require_micro_positive: bool
+
+    @field_validator("reference_route_id")
+    @classmethod
+    def _validate_reference_route_id(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("strategy route cross_symbol_context reference_route_id must be non-empty")
+        return candidate
+
+
+class RouteCrossSymbolContextConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    rules: list[CrossSymbolRuleConfig] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_rules_when_enabled(self) -> RouteCrossSymbolContextConfig:
+        if self.enabled and not self.rules:
+            raise ValueError(
+                "strategy route cross_symbol_context.enabled=true requires non-empty rules"
+            )
+        return self
+
+
 class RouteRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -400,6 +431,9 @@ class RouteRule(BaseModel):
     stop_offset: float = 0.01
     confluence: RouteConfluenceConfig = Field(default_factory=RouteConfluenceConfig)
     atr: RouteATRConfig = Field(default_factory=RouteATRConfig)
+    cross_symbol_context: RouteCrossSymbolContextConfig = Field(
+        default_factory=RouteCrossSymbolContextConfig
+    )
 
     @field_validator("id", "outfit_id")
     @classmethod
@@ -609,6 +643,32 @@ class Settings(BaseModel):
 
         outfit_metadata = _load_outfit_metadata(Path(self.outfits_path))
         for index, route in enumerate(routes):
+            seen_reference_route_ids: set[str] = set()
+            for rule in route.cross_symbol_context.rules:
+                reference_route_id = rule.reference_route_id
+                if reference_route_id in seen_reference_route_ids:
+                    raise ValueError(
+                        "strategy.routes[{}] cross_symbol_context duplicate reference_route_id '{}'".format(
+                            index,
+                            reference_route_id,
+                        )
+                    )
+                seen_reference_route_ids.add(reference_route_id)
+                if reference_route_id == route.id:
+                    raise ValueError(
+                        "strategy.routes[{}] cross_symbol_context self-reference is not allowed for route '{}'".format(
+                            index,
+                            route.id,
+                        )
+                    )
+                if reference_route_id not in seen_route_ids:
+                    raise ValueError(
+                        "strategy.routes[{}] cross_symbol_context unknown reference_route_id '{}'".format(
+                            index,
+                            reference_route_id,
+                        )
+                    )
+
             metadata = outfit_metadata.get(route.outfit_id)
             if metadata is None:
                 raise ValueError(

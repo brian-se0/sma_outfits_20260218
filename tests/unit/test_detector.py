@@ -7,7 +7,12 @@ import pytest
 
 from sma_outfits.config.models import RouteRule
 from sma_outfits.events import BarEvent, SMAState
-from sma_outfits.signals.detector import OutfitDefinition, StrikeDetector, load_outfits
+from sma_outfits.signals.detector import (
+    OutfitDefinition,
+    RouteBarContext,
+    StrikeDetector,
+    load_outfits,
+)
 
 
 def _bar(
@@ -234,6 +239,295 @@ def test_strict_routing_missing_route_fails() -> None:
         detector.detect(
             bar=bar,
             sma_states={10: _state(bar, 10, 100.0)},
+            history=_history(99.0, 100.0),
+        )
+
+
+def test_cross_symbol_context_passes_when_reference_matches() -> None:
+    reference_route = RouteRule(
+        id="qqq_1m_ref",
+        symbol="QQQ",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="precision_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+    )
+    primary_route = RouteRule(
+        id="spy_1m_cross",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="precision_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+        cross_symbol_context={
+            "enabled": True,
+            "rules": [
+                {
+                    "reference_route_id": "qqq_1m_ref",
+                    "require_macro_positive": False,
+                    "require_micro_positive": False,
+                }
+            ],
+        },
+    )
+    detector = StrikeDetector(
+        outfits=[OutfitDefinition("route_outfit", (10,), "route", "10")],
+        routes=[primary_route, reference_route],
+        strict_routing=True,
+    )
+    bar = _bar(symbol="SPY", close=100.0, minute=12)
+    states = {10: _state(bar, 10, 100.0)}
+    reference_context = RouteBarContext(
+        route=reference_route,
+        key_sma=100.0,
+        micro_positive=False,
+        macro_positive=False,
+    )
+
+    strikes, signals = detector.detect(
+        bar=bar,
+        sma_states=states,
+        history=_history(99.0, 100.0),
+        cross_context_lookup=lambda route_id, _ts: (
+            reference_context if route_id == "qqq_1m_ref" else None
+        ),
+    )
+    assert len(strikes) == 1
+    assert len(signals) == 1
+
+
+def test_cross_symbol_context_fails_on_macro_mismatch() -> None:
+    reference_route = RouteRule(
+        id="qqq_1m_ref",
+        symbol="QQQ",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="precision_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+    )
+    primary_route = RouteRule(
+        id="spy_1m_cross",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="precision_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+        cross_symbol_context={
+            "enabled": True,
+            "rules": [
+                {
+                    "reference_route_id": "qqq_1m_ref",
+                    "require_macro_positive": False,
+                    "require_micro_positive": False,
+                }
+            ],
+        },
+    )
+    detector = StrikeDetector(
+        outfits=[OutfitDefinition("route_outfit", (10,), "route", "10")],
+        routes=[primary_route, reference_route],
+        strict_routing=True,
+    )
+    bar = _bar(symbol="SPY", close=100.0, minute=13)
+    states = {10: _state(bar, 10, 100.0)}
+    reference_context = RouteBarContext(
+        route=reference_route,
+        key_sma=100.0,
+        micro_positive=False,
+        macro_positive=True,
+    )
+
+    strikes, signals = detector.detect(
+        bar=bar,
+        sma_states=states,
+        history=_history(99.0, 100.0),
+        cross_context_lookup=lambda _route_id, _ts: reference_context,
+    )
+    assert strikes == []
+    assert signals == []
+
+
+def test_cross_symbol_context_fails_on_micro_mismatch() -> None:
+    reference_route = RouteRule(
+        id="qqq_1m_ref",
+        symbol="QQQ",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="precision_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+    )
+    primary_route = RouteRule(
+        id="spy_1m_cross",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="precision_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+        cross_symbol_context={
+            "enabled": True,
+            "rules": [
+                {
+                    "reference_route_id": "qqq_1m_ref",
+                    "require_macro_positive": False,
+                    "require_micro_positive": False,
+                }
+            ],
+        },
+    )
+    detector = StrikeDetector(
+        outfits=[OutfitDefinition("route_outfit", (10,), "route", "10")],
+        routes=[primary_route, reference_route],
+        strict_routing=True,
+    )
+    bar = _bar(symbol="SPY", close=100.0, minute=14)
+    states = {10: _state(bar, 10, 100.0)}
+    reference_context = RouteBarContext(
+        route=reference_route,
+        key_sma=100.0,
+        micro_positive=True,
+        macro_positive=False,
+    )
+
+    strikes, signals = detector.detect(
+        bar=bar,
+        sma_states=states,
+        history=_history(99.0, 100.0),
+        cross_context_lookup=lambda _route_id, _ts: reference_context,
+    )
+    assert strikes == []
+    assert signals == []
+
+
+def test_cross_symbol_context_fails_when_reference_missing() -> None:
+    reference_route = RouteRule(
+        id="qqq_1m_ref",
+        symbol="QQQ",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="precision_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+    )
+    primary_route = RouteRule(
+        id="spy_1m_cross",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="precision_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+        cross_symbol_context={
+            "enabled": True,
+            "rules": [
+                {
+                    "reference_route_id": "qqq_1m_ref",
+                    "require_macro_positive": False,
+                    "require_micro_positive": False,
+                }
+            ],
+        },
+    )
+    detector = StrikeDetector(
+        outfits=[OutfitDefinition("route_outfit", (10,), "route", "10")],
+        routes=[primary_route, reference_route],
+        strict_routing=True,
+    )
+    bar = _bar(symbol="SPY", close=100.0, minute=15)
+    states = {10: _state(bar, 10, 100.0)}
+
+    strikes, signals = detector.detect(
+        bar=bar,
+        sma_states=states,
+        history=_history(99.0, 100.0),
+        cross_context_lookup=lambda _route_id, _ts: None,
+    )
+    assert strikes == []
+    assert signals == []
+
+
+def test_cross_symbol_context_requires_lookup_callback_when_enabled() -> None:
+    primary_route = RouteRule(
+        id="spy_1m_cross",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="precision_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+        cross_symbol_context={
+            "enabled": True,
+            "rules": [
+                {
+                    "reference_route_id": "qqq_1m_ref",
+                    "require_macro_positive": False,
+                    "require_micro_positive": False,
+                }
+            ],
+        },
+    )
+    detector = StrikeDetector(
+        outfits=[OutfitDefinition("route_outfit", (10,), "route", "10")],
+        routes=[primary_route],
+        strict_routing=True,
+    )
+    bar = _bar(symbol="SPY", close=100.0, minute=16)
+    states = {10: _state(bar, 10, 100.0)}
+
+    with pytest.raises(RuntimeError, match="cross_symbol_context is enabled"):
+        detector.detect(
+            bar=bar,
+            sma_states=states,
             history=_history(99.0, 100.0),
         )
 

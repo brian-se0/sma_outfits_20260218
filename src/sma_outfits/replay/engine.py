@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -14,6 +15,7 @@ from sma_outfits.events import (
     ArchiveRecord,
     BarEvent,
     PositionEvent,
+    SMAState,
     SignalEvent,
     StrikeEvent,
     event_to_record,
@@ -21,7 +23,7 @@ from sma_outfits.events import (
 from sma_outfits.indicators.sma_engine import SMAEngine
 from sma_outfits.reporting.summary import build_summary
 from sma_outfits.risk.manager import ManagedPosition, RiskManager
-from sma_outfits.signals.detector import StrikeDetector, load_outfits
+from sma_outfits.signals.detector import RouteBarContext, StrikeDetector, load_outfits
 
 
 @dataclass(slots=True, frozen=True)
@@ -34,6 +36,15 @@ class ReplayResult:
 
 
 ReplayProgressCallback = Callable[[int, int, str, str, pd.Timestamp], None]
+
+
+@dataclass(slots=True)
+class _ReplayBarWork:
+    key: tuple[str, str]
+    bar: BarEvent
+    history: pd.DataFrame
+    sma_states: dict[int, SMAState]
+    route_context: RouteBarContext | None
 
 
 class ReplayEngine:
@@ -86,13 +97,14 @@ class ReplayEngine:
         symbols = symbols or self.settings.universe.symbols
         timeframes = timeframes or self.settings.timeframes.live
         execution_pairs = self._resolve_execution_pairs(symbols=symbols, timeframes=timeframes)
+        self._preflight_cross_context_execution_pairs(execution_pairs)
 
         strikes: list[StrikeEvent] = []
         signals: list[SignalEvent] = []
         position_events: list[PositionEvent] = []
         archive_records: list[ArchiveRecord] = []
         proxy_prices: dict[str, float] = {}
-        jobs: list[tuple[str, str, pd.DataFrame]] = []
+        bars_by_pair: dict[tuple[str, str], pd.DataFrame] = {}
         total_bars = 0
 
         for symbol, timeframe in execution_pairs:
@@ -100,18 +112,40 @@ class ReplayEngine:
             if bars.empty:
                 continue
             bars = bars.sort_values("ts").reset_index(drop=True)
-            jobs.append((symbol, timeframe, bars))
+            bars_by_pair[(symbol, timeframe)] = bars
             total_bars += len(bars)
 
         if total_bars == 0:
             raise RuntimeError("Replay aborted: no stored bars found for requested symbols/timeframes")
 
-        processed_bars = 0
-        for symbol, timeframe, bars in jobs:
-            history = pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
-            active_positions: list[ManagedPosition] = []
+        pointers: dict[tuple[str, str], int] = {key: 0 for key in bars_by_pair}
+        history_by_key: dict[tuple[str, str], pd.DataFrame] = {}
+        active_positions_by_key: dict[tuple[str, str], list[ManagedPosition]] = {}
+        latest_context_by_route_id: dict[str, tuple[pd.Timestamp, RouteBarContext]] = {}
 
-            for row in bars.itertuples(index=False):
+        def _cross_context_lookup(reference_route_id: str, ts: datetime) -> RouteBarContext | None:
+            return self._lookup_cross_context(
+                latest_context_by_route_id=latest_context_by_route_id,
+                reference_route_id=reference_route_id,
+                bar_ts=ts,
+            )
+
+        processed_bars = 0
+        while True:
+            next_ts = self._next_batch_timestamp(bars_by_pair=bars_by_pair, pointers=pointers)
+            if next_ts is None:
+                break
+
+            batch_rows = self._consume_timestamp_batch(
+                ts=next_ts,
+                bars_by_pair=bars_by_pair,
+                pointers=pointers,
+            )
+            pass_work: list[_ReplayBarWork] = []
+
+            # Pass A: update history/SMA/context for all bars in this timestamp batch first.
+            for key, row in batch_rows:
+                symbol, timeframe = key
                 bar_ts = _to_utc_timestamp(row.ts)
                 bar = BarEvent(
                     symbol=symbol,
@@ -129,39 +163,62 @@ class ReplayEngine:
                 if progress_callback is not None:
                     progress_callback(processed_bars, total_bars, symbol, timeframe, bar_ts)
 
-                history = self._append_history(history, bar)
-                source_value = _strategy_source_value(
-                    bar=bar,
-                    price_basis=self.settings.strategy.price_basis,
-                )
+                history = history_by_key.get(key)
+                if history is None:
+                    history = _empty_history_frame()
+                history = self._append_history(history=history, bar=bar)
+                history_by_key[key] = history
+
                 sma_states = self.sma_engine.update(
                     symbol=bar.symbol,
                     timeframe=bar.timeframe,
                     ts=bar.ts,
-                    source_value=source_value,
+                    source_value=_strategy_source_value(
+                        bar=bar,
+                        price_basis=self.settings.strategy.price_basis,
+                    ),
                 )
-                route_context = self.detector.build_route_context(
-                    bar=bar,
-                    sma_states=sma_states,
+                route_context = self.detector.build_route_context(bar=bar, sma_states=sma_states)
+                if route_context is not None:
+                    latest_context_by_route_id[route_context.route.id] = (bar_ts, route_context)
+
+                pass_work.append(
+                    _ReplayBarWork(
+                        key=key,
+                        bar=bar,
+                        history=history,
+                        sma_states=sma_states,
+                        route_context=route_context,
+                    )
                 )
+
+            # Pass B: detect signals and run risk after same-timestamp contexts are available.
+            for work in pass_work:
                 new_strikes, detected_signals = self.detector.detect(
-                    bar=bar,
-                    sma_states=sma_states,
-                    history=history,
+                    bar=work.bar,
+                    sma_states=work.sma_states,
+                    history=work.history,
                     session_type="regular",
+                    cross_context_lookup=_cross_context_lookup,
                 )
                 new_signals = [
                     self.risk_manager.prepare_signal_for_entry(
                         signal=signal,
-                        route_history=history,
+                        route_history=work.history,
                     )
                     for signal in detected_signals
                 ]
                 strikes.extend(new_strikes)
                 signals.extend(new_signals)
+
+                active_positions = active_positions_by_key.get(work.key, [])
                 for signal in new_signals:
                     active_positions.append(
-                        self.risk_manager.open_position(signal, symbol=symbol, ts=bar.ts)
+                        self.risk_manager.open_position(
+                            signal=signal,
+                            symbol=work.bar.symbol,
+                            ts=work.bar.ts,
+                        )
                     )
 
                 for strike, signal in zip(new_strikes, new_signals, strict=True):
@@ -171,16 +228,16 @@ class ReplayEngine:
                 next_positions: list[ManagedPosition] = []
                 for position in active_positions:
                     events = self.risk_manager.evaluate_bar(
-                        position,
-                        bar=bar,
+                        position=position,
+                        bar=work.bar,
                         proxy_prices=proxy_prices,
-                        route_context=route_context,
-                        route_history=history,
+                        route_context=work.route_context,
+                        route_history=work.history,
                     )
                     position_events.extend(events)
                     if not position.closed:
                         next_positions.append(position)
-                active_positions = next_positions
+                active_positions_by_key[work.key] = next_positions
 
         summary = build_summary(strikes=strikes, signals=signals, position_events=position_events)
         if strikes:
@@ -248,6 +305,96 @@ class ReplayEngine:
             caption=caption,
             ts=strike.bar_ts,
         )
+
+    def _preflight_cross_context_execution_pairs(
+        self,
+        execution_pairs: list[tuple[str, str]],
+    ) -> None:
+        selected_pairs = set(execution_pairs)
+        violations: list[str] = []
+        for route in self.settings.strategy.routes:
+            route_pair = (route.symbol, route.timeframe)
+            if route_pair not in selected_pairs:
+                continue
+            cross_context = route.cross_symbol_context
+            if not cross_context.enabled:
+                continue
+            for rule in cross_context.rules:
+                reference_route = self._routes_by_id.get(rule.reference_route_id)
+                if reference_route is None:
+                    raise RuntimeError(
+                        "Cross-symbol context preflight failed for replay: route '{}' "
+                        "references unknown route_id '{}'".format(
+                            route.id,
+                            rule.reference_route_id,
+                        )
+                    )
+                reference_pair = (reference_route.symbol, reference_route.timeframe)
+                if reference_pair not in selected_pairs:
+                    violations.append(
+                        "{} requires {} ({}/{})".format(
+                            route.id,
+                            rule.reference_route_id,
+                            reference_pair[0],
+                            reference_pair[1],
+                        )
+                    )
+        if violations:
+            raise RuntimeError(
+                "Cross-symbol context preflight failed for replay: selected symbols/timeframes "
+                "omit required reference route pairs ({}).".format("; ".join(violations))
+            )
+
+    @staticmethod
+    def _next_batch_timestamp(
+        *,
+        bars_by_pair: dict[tuple[str, str], pd.DataFrame],
+        pointers: dict[tuple[str, str], int],
+    ) -> pd.Timestamp | None:
+        next_ts: pd.Timestamp | None = None
+        for key, bars in bars_by_pair.items():
+            pointer = pointers[key]
+            if pointer >= len(bars):
+                continue
+            candidate = _to_utc_timestamp(bars.iloc[pointer]["ts"])
+            if next_ts is None or candidate < next_ts:
+                next_ts = candidate
+        return next_ts
+
+    @staticmethod
+    def _consume_timestamp_batch(
+        *,
+        ts: pd.Timestamp,
+        bars_by_pair: dict[tuple[str, str], pd.DataFrame],
+        pointers: dict[tuple[str, str], int],
+    ) -> list[tuple[tuple[str, str], pd.Series]]:
+        batch_rows: list[tuple[tuple[str, str], pd.Series]] = []
+        for key in sorted(bars_by_pair.keys()):
+            bars = bars_by_pair[key]
+            pointer = pointers[key]
+            if pointer >= len(bars):
+                continue
+            candidate_ts = _to_utc_timestamp(bars.iloc[pointer]["ts"])
+            if candidate_ts != ts:
+                continue
+            batch_rows.append((key, bars.iloc[pointer]))
+            pointers[key] = pointer + 1
+        return batch_rows
+
+    @staticmethod
+    def _lookup_cross_context(
+        *,
+        latest_context_by_route_id: dict[str, tuple[pd.Timestamp, RouteBarContext]],
+        reference_route_id: str,
+        bar_ts: datetime,
+    ) -> RouteBarContext | None:
+        cached = latest_context_by_route_id.get(reference_route_id)
+        if cached is None:
+            return None
+        cached_ts, context = cached
+        if cached_ts <= _to_utc_timestamp(bar_ts):
+            return context
+        return None
 
     @staticmethod
     def _resolve_outfits_path(outfits_path: str) -> Path:
@@ -318,6 +465,10 @@ def _to_utc_timestamp(value: object) -> pd.Timestamp:
     if ts.tzinfo is None:
         return ts.tz_localize("UTC")
     return ts.tz_convert("UTC")
+
+
+def _empty_history_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
 
 
 def _strategy_source_value(bar: BarEvent, price_basis: str) -> float:

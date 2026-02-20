@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from enum import Enum
 from pathlib import Path
@@ -8,10 +9,20 @@ from typing import Annotated
 
 import pandas as pd
 import typer
+import yaml
 
-from sma_outfits.config.models import Settings, load_settings
+from sma_outfits.config.models import (
+    AlpacaConfig,
+    SessionsConfig,
+    Settings,
+    TimeframesConfig,
+    UniverseConfig,
+    load_settings,
+    read_env_local,
+)
 from sma_outfits.data.alpaca_clients import AlpacaRESTClient
-from sma_outfits.data.ingest import BackfillResult, backfill_historical
+from sma_outfits.data.ingest import BackfillResult, backfill_historical, source_timeframe_for
+from sma_outfits.data.resample import resample_ohlcv
 from sma_outfits.data.storage import StorageManager
 from sma_outfits.live import LiveRunner
 from sma_outfits.monitoring.logging import configure_logging
@@ -32,6 +43,35 @@ class ReportAttributionMode(str, Enum):
 
 def _load_runtime_settings(config: Path) -> Settings:
     return load_settings(config_path=config, env_path=Path(".env.local"))
+
+
+def _load_discovery_runtime(
+    config: Path | None,
+) -> tuple[AlpacaConfig, UniverseConfig, TimeframesConfig, SessionsConfig]:
+    env = read_env_local(Path(".env.local"))
+    alpaca = AlpacaConfig.model_validate(
+        {
+            "api_key": env["ALPACA_API_KEY"],
+            "secret_key": env["ALPACA_SECRET_KEY"],
+            "base_url": env["ALPACA_BASE_URL"],
+            "data_url": env["ALPACA_DATA_URL"],
+            "data_feed": env["ALPACA_DATA_FEED"],
+        }
+    )
+    if config is None:
+        return alpaca, UniverseConfig(), TimeframesConfig(), SessionsConfig()
+
+    if not config.exists():
+        raise FileNotFoundError(f"Config file not found: {config}")
+    parsed = yaml.safe_load(config.read_text(encoding="utf-8"))
+    if parsed is None:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        raise ValueError("YAML root must be a map")
+    universe = UniverseConfig.model_validate(parsed.get("universe", {}))
+    timeframes = TimeframesConfig.model_validate(parsed.get("timeframes", {}))
+    sessions = SessionsConfig.model_validate(parsed.get("sessions", {}))
+    return alpaca, universe, timeframes, sessions
 
 
 def _effective_symbols(user_symbols: str, settings: Settings) -> list[str]:
@@ -77,6 +117,36 @@ def _effective_strategy_timeframes(
 def _validate_symbol_market_mappings(symbols: list[str], settings: Settings) -> None:
     for symbol in symbols:
         market_for_symbol(symbol, settings.universe.symbol_markets)
+
+
+def _stock_symbols_only(
+    symbols: list[str],
+    symbol_markets: dict[str, str],
+) -> list[str]:
+    stock_symbols = [
+        symbol
+        for symbol in symbols
+        if market_for_symbol(symbol, symbol_markets) == "stocks"
+    ]
+    if not stock_symbols:
+        raise RuntimeError(
+            "No stock symbols available for requested scope. "
+            "discover-range and readiness checks are stock-only."
+        )
+    return stock_symbols
+
+
+def _write_json_with_hash(
+    payload: dict[str, object],
+    output: Path,
+) -> tuple[Path, Path, str]:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(payload, indent=2, sort_keys=True)
+    output.write_text(serialized + "\n", encoding="utf-8")
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    hash_path = output.with_suffix(output.suffix + ".sha256")
+    hash_path.write_text(f"{digest}  {output.name}\n", encoding="utf-8")
+    return output, hash_path, digest
 
 
 def _preflight_strict_route_scope(
@@ -138,6 +208,117 @@ def validate_config(
         "archive_enabled": settings.archive.enabled,
     }
     typer.echo(json.dumps(payload, indent=2))
+
+
+@app.command("discover-range")
+def discover_range(
+    config: Path | None = typer.Option(
+        Path("configs/settings.example.yaml"),
+        "--config",
+        help="Optional config for universe/timeframes/session defaults",
+    ),
+    symbols: str = typer.Option("", "--symbols", help="CSV symbols override"),
+    timeframes: str = typer.Option("", "--timeframes", help="CSV timeframes override"),
+    output: Path = typer.Option(
+        Path("artifacts/readiness/discovered_range_manifest.json"),
+        "--output",
+        help="Output manifest path",
+    ),
+    start: str = typer.Option(
+        "2000-01-01T00:00:00Z",
+        "--start",
+        help="UTC discovery start bound",
+    ),
+    end: str | None = typer.Option(
+        None,
+        "--end",
+        help="UTC discovery end bound (default: now)",
+    ),
+) -> None:
+    assert_python_runtime()
+    alpaca, universe, timeframe_cfg, sessions = _load_discovery_runtime(config)
+    selected_symbols = (
+        dedupe_keep_order([value.upper() for value in parse_csv(symbols)])
+        if symbols
+        else universe.symbols
+    )
+    selected_timeframes = (
+        dedupe_keep_order(parse_csv(timeframes))
+        if timeframes
+        else list(dict.fromkeys([*timeframe_cfg.live, *timeframe_cfg.derived]))
+    )
+    stock_symbols = _stock_symbols_only(selected_symbols, universe.symbol_markets)
+    start_ts = ensure_utc_timestamp(start)
+    end_ts = ensure_utc_timestamp(end) if end is not None else pd.Timestamp.now(tz="UTC")
+    if start_ts >= end_ts:
+        raise ValueError("start must be earlier than end for discover-range")
+
+    client = AlpacaRESTClient(alpaca)
+    earliest_source_rows: dict[tuple[str, str], pd.DataFrame] = {}
+    records: list[dict[str, str]] = []
+    for symbol in stock_symbols:
+        for timeframe in selected_timeframes:
+            source_tf = source_timeframe_for(timeframe)
+            source_key = (symbol, source_tf)
+            source_frame = earliest_source_rows.get(source_key)
+            if source_frame is None:
+                source_frame = client.discover_earliest_bar_frame(
+                    symbol=symbol,
+                    timeframe=source_tf,
+                    market="stocks",
+                    start=start_ts,
+                    end=end_ts,
+                )
+                earliest_source_rows[source_key] = source_frame
+
+            if timeframe == source_tf:
+                target_frame = source_frame
+            else:
+                target_frame = resample_ohlcv(
+                    source_frame,
+                    timeframe=timeframe,
+                    timezone=sessions.timezone,
+                    anchors=timeframe_cfg.anchors,
+                )
+                if target_frame.empty:
+                    raise RuntimeError(
+                        f"discover-range produced empty resample for {symbol} {timeframe}"
+                    )
+            earliest_ts = ensure_utc_timestamp(target_frame.iloc[0]["ts"])
+            records.append(
+                {
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "source_timeframe": source_tf,
+                    "earliest_ts": earliest_ts.isoformat(),
+                }
+            )
+
+    sorted_records = sorted(
+        records,
+        key=lambda row: (row["symbol"], row["timeframe"]),
+    )
+    if not sorted_records:
+        raise RuntimeError("discover-range found no stock discovery records")
+    full_range_start = min(
+        ensure_utc_timestamp(row["earliest_ts"]) for row in sorted_records
+    ).isoformat()
+    payload: dict[str, object] = {
+        "status": "ok",
+        "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
+        "config": str(config) if config is not None else None,
+        "discovery_window_start": start_ts.isoformat(),
+        "discovery_window_end": end_ts.isoformat(),
+        "full_range_start": full_range_start,
+        "stocks": stock_symbols,
+        "timeframes": selected_timeframes,
+        "records": sorted_records,
+    }
+    manifest_path, hash_path, digest = _write_json_with_hash(payload, output)
+    typer.echo(json.dumps(payload, indent=2))
+    typer.echo(f"manifest_path={manifest_path}")
+    typer.echo(f"manifest_sha256={digest}")
+    typer.echo(f"manifest_hash_path={hash_path}")
 
 
 @app.command("backfill")
@@ -358,6 +539,128 @@ def replay(
     typer.echo(json.dumps(result.summary, indent=2))
     typer.echo(f"report_markdown={markdown_path}")
     typer.echo(f"report_csv={csv_path}")
+
+
+@app.command("verify-readiness")
+def verify_readiness(
+    config: Path = typer.Option(Path("configs/settings.example.yaml"), "--config"),
+    start: str = typer.Option(..., "--start", help="UTC start timestamp"),
+    end: str = typer.Option(..., "--end", help="UTC end timestamp"),
+    symbols: str = typer.Option("", "--symbols", help="CSV symbols override"),
+    timeframes: str = typer.Option("", "--timeframes", help="CSV timeframes override"),
+    output: Path = typer.Option(
+        Path("artifacts/readiness/readiness_acceptance.json"),
+        "--output",
+        help="Output readiness acceptance manifest path",
+    ),
+    require_report_artifacts: bool = typer.Option(
+        True,
+        "--require-report-artifacts/--no-require-report-artifacts",
+        help="Require at least one report artifact under archive/reports",
+    ),
+) -> None:
+    assert_python_runtime()
+    settings = _load_runtime_settings(config)
+    selected_symbols = _effective_symbols(symbols, settings)
+    selected_timeframes = _effective_timeframes(timeframes, settings)
+    stock_symbols = _stock_symbols_only(selected_symbols, settings.universe.symbol_markets)
+    start_ts = ensure_utc_timestamp(start)
+    end_ts = ensure_utc_timestamp(end)
+    if start_ts >= end_ts:
+        raise ValueError("start must be earlier than end for verify-readiness")
+
+    storage = StorageManager(Path(settings.storage_root))
+    missing_pairs: list[str] = []
+    monotonicity_failures: list[str] = []
+    checked_pairs = 0
+    for symbol in stock_symbols:
+        for timeframe in selected_timeframes:
+            checked_pairs += 1
+            bars = storage.read_bars(
+                symbol=symbol,
+                timeframe=timeframe,
+                start=start_ts,
+                end=end_ts,
+            )
+            if bars.empty:
+                missing_pairs.append(f"{symbol}/{timeframe}")
+                continue
+            ts = pd.to_datetime(bars["ts"], utc=True)
+            if not bool(ts.is_monotonic_increasing):
+                monotonicity_failures.append(f"{symbol}/{timeframe}:non_monotonic")
+            if bool(ts.duplicated().any()):
+                monotonicity_failures.append(f"{symbol}/{timeframe}:duplicate_ts")
+
+    if missing_pairs:
+        raise RuntimeError(
+            "Readiness acceptance failed: missing backfill coverage for pairs "
+            + ", ".join(sorted(missing_pairs))
+        )
+    if monotonicity_failures:
+        raise RuntimeError(
+            "Readiness acceptance failed: timestamp monotonicity violations for pairs "
+            + ", ".join(sorted(monotonicity_failures))
+        )
+
+    strikes = storage.load_events("strikes")
+    signals = storage.load_events("signals")
+    positions = storage.load_events("positions")
+    summary = build_summary_from_records(
+        strike_rows=strikes,
+        signal_rows=signals,
+        position_rows=positions,
+        start=start_ts,
+        end=end_ts,
+        attribution_mode="both",
+    )
+
+    report_root = Path(settings.archive.root) / "reports"
+    report_files = sorted([*report_root.glob("*.md"), *report_root.glob("*.csv")])
+    if require_report_artifacts and not report_files:
+        raise RuntimeError(
+            "Readiness acceptance failed: no report artifacts found in "
+            f"{report_root}"
+        )
+
+    events_root = Path(settings.storage_root) / "events"
+    hash_files: list[Path] = []
+    for path in sorted(
+        [
+            events_root / "strikes.jsonl",
+            events_root / "signals.jsonl",
+            events_root / "positions.jsonl",
+            *report_files,
+        ]
+    ):
+        if path.exists() and path.is_file():
+            hash_files.append(path)
+
+    hashes: dict[str, str] = {}
+    for path in hash_files:
+        hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    payload: dict[str, object] = {
+        "status": "ok",
+        "checked_at": pd.Timestamp.now(tz="UTC").isoformat(),
+        "config": str(config),
+        "start": start_ts.isoformat(),
+        "end": end_ts.isoformat(),
+        "stock_symbols": stock_symbols,
+        "timeframes": selected_timeframes,
+        "pairs_checked": checked_pairs,
+        "summary_snapshot": {
+            "total_strikes": summary["total_strikes"],
+            "total_signals": summary["total_signals"],
+            "closed_positions": summary["closed_positions"],
+            "attribution_mode": summary["attribution_mode"],
+        },
+        "artifact_hashes": hashes,
+    }
+    manifest_path, hash_path, digest = _write_json_with_hash(payload, output)
+    typer.echo(json.dumps(payload, indent=2))
+    typer.echo(f"readiness_manifest_path={manifest_path}")
+    typer.echo(f"readiness_manifest_sha256={digest}")
+    typer.echo(f"readiness_manifest_hash_path={hash_path}")
 
 
 @app.command("report")
