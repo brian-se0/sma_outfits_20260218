@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from statistics import median
@@ -12,7 +11,7 @@ import pandas as pd
 from sma_outfits.events import PositionEvent, SignalEvent, StrikeEvent
 from sma_outfits.utils import ensure_utc_timestamp
 
-AttributionMode = Literal["strike", "close", "both"]
+AttributionMode = Literal["both"]
 
 
 def build_summary(
@@ -77,9 +76,9 @@ def build_summary_from_records(
     end: pd.Timestamp | None = None,
     attribution_mode: AttributionMode = "both",
 ) -> dict[str, Any]:
-    if attribution_mode not in {"strike", "close", "both"}:
+    if attribution_mode != "both":
         raise ValueError(
-            "Unsupported attribution_mode '{}'. Expected one of: strike, close, both".format(
+            "Unsupported attribution_mode '{}'. Expected: both".format(
                 attribution_mode
             )
         )
@@ -103,16 +102,11 @@ def build_summary_from_records(
         end=end,
     )
 
-    if attribution_mode == "strike":
-        summary = dict(strike_summary)
-    elif attribution_mode == "close":
-        summary = dict(close_summary)
-        summary["close_attribution"] = dict(close_summary)
-    else:
-        summary = dict(strike_summary)
-        summary["close_attribution"] = dict(close_summary)
-    summary["attribution_mode"] = attribution_mode
-    return summary
+    return {
+        "attribution_mode": "both",
+        "strike_attribution": dict(strike_summary),
+        "close_attribution": dict(close_summary),
+    }
 
 
 def write_summary_report(
@@ -124,60 +118,42 @@ def write_summary_report(
     markdown_path = root / f"{label}.md"
     csv_path = root / f"{label}.csv"
 
-    attribution_mode = str(summary.get("attribution_mode", "strike"))
+    attribution_mode = str(summary.get("attribution_mode", ""))
+    if attribution_mode != "both":
+        raise RuntimeError(
+            "Summary contract violation: write_summary_report requires attribution_mode='both'"
+        )
+    strike_summary = _require_strike_attribution(summary)
+    close_summary = _require_close_attribution(summary)
     markdown: list[str] = [
         f"# Replay Summary: {label}",
         "",
-        f"- attribution_mode: `{attribution_mode}`",
+        "- attribution_mode: `both`",
         "",
     ]
 
-    if attribution_mode == "both":
-        close_summary = _require_close_attribution(summary)
-        markdown.extend(
-            _render_markdown_section(
-                title="Strike-Time Attribution",
-                summary=summary,
-            )
+    markdown.extend(
+        _render_markdown_section(
+            title="Strike-Time Attribution",
+            summary=strike_summary,
         )
-        markdown.append("")
-        markdown.extend(
-            _render_markdown_section(
-                title="Close-Time Attribution",
-                summary=close_summary,
-            )
+    )
+    markdown.append("")
+    markdown.extend(
+        _render_markdown_section(
+            title="Close-Time Attribution",
+            summary=close_summary,
         )
-    elif attribution_mode == "close":
-        markdown.extend(
-            _render_markdown_section(
-                title="Close-Time Attribution",
-                summary=summary,
-            )
-        )
-    else:
-        markdown.extend(
-            _render_markdown_section(
-                title="Strike-Time Attribution",
-                summary=summary,
-            )
-        )
+    )
 
     markdown_path.write_text("\n".join(markdown) + "\n", encoding="utf-8")
 
-    flattened = _flatten_summary(summary, skip_keys={"close_attribution"})
-    if "attribution_mode" not in flattened:
-        flattened["attribution_mode"] = attribution_mode
-
-    close_payload = summary.get("close_attribution")
-    if isinstance(close_payload, dict):
-        flattened.update(_flatten_summary(close_payload, prefix="close_"))
+    flattened = {"attribution_mode": "both"}
+    flattened.update(_flatten_summary(strike_summary, prefix="strike_"))
+    flattened.update(_flatten_summary(close_summary, prefix="close_"))
 
     pd.DataFrame([flattened]).to_csv(csv_path, index=False)
     return markdown_path, csv_path
-
-
-def records_to_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [asdict(row) if hasattr(row, "__dict__") else row for row in rows]
 
 
 def _compute_signal_outcomes(
@@ -408,6 +384,16 @@ def _require_close_attribution(summary: dict[str, Any]) -> dict[str, Any]:
             "dict close_attribution payload"
         )
     return close_payload
+
+
+def _require_strike_attribution(summary: dict[str, Any]) -> dict[str, Any]:
+    strike_payload = summary.get("strike_attribution")
+    if not isinstance(strike_payload, dict):
+        raise RuntimeError(
+            "Summary contract violation: attribution_mode='both' requires "
+            "dict strike_attribution payload"
+        )
+    return strike_payload
 
 
 def _rate_breakdown(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:

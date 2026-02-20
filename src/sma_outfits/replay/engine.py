@@ -20,6 +20,14 @@ from sma_outfits.events import (
     StrikeEvent,
     event_to_record,
 )
+from sma_outfits.execution import (
+    RollingBarBuffer,
+    preflight_cross_symbol_context_execution_pairs,
+    resolve_execution_scope,
+    resolve_outfits_path,
+    strategy_source_value,
+    to_utc_timestamp,
+)
 from sma_outfits.indicators.sma_engine import SMAEngine
 from sma_outfits.reporting.summary import build_summary
 from sma_outfits.risk.manager import ManagedPosition, RiskManager
@@ -51,7 +59,7 @@ class ReplayEngine:
     def __init__(self, settings: Settings, storage: StorageManager) -> None:
         self.settings = settings
         self.storage = storage
-        outfits_path = self._resolve_outfits_path(settings.outfits_path)
+        outfits_path = resolve_outfits_path(settings.outfits_path)
         self.outfits = load_outfits(outfits_path)
         self._routes_by_id: dict[str, RouteRule] = {
             route.id: route for route in self.settings.strategy.routes
@@ -96,8 +104,18 @@ class ReplayEngine:
         self._init_pipeline_components()
         symbols = symbols or self.settings.universe.symbols
         timeframes = timeframes or self.settings.timeframes.live
-        execution_pairs = self._resolve_execution_pairs(symbols=symbols, timeframes=timeframes)
-        self._preflight_cross_context_execution_pairs(execution_pairs)
+        execution_pairs = resolve_execution_scope(
+            settings=self.settings,
+            symbols=symbols,
+            timeframes=timeframes,
+            command="replay",
+        ).execution_pairs
+        preflight_cross_symbol_context_execution_pairs(
+            routes_by_id=self._routes_by_id,
+            routes=self.settings.strategy.routes,
+            execution_pairs=execution_pairs,
+            command="replay",
+        )
 
         strikes: list[StrikeEvent] = []
         signals: list[SignalEvent] = []
@@ -119,7 +137,7 @@ class ReplayEngine:
             raise RuntimeError("Replay aborted: no stored bars found for requested symbols/timeframes")
 
         pointers: dict[tuple[str, str], int] = {key: 0 for key in bars_by_pair}
-        history_by_key: dict[tuple[str, str], pd.DataFrame] = {}
+        history_by_key: dict[tuple[str, str], RollingBarBuffer] = {}
         active_positions_by_key: dict[tuple[str, str], list[ManagedPosition]] = {}
         latest_context_by_route_id: dict[str, tuple[pd.Timestamp, RouteBarContext]] = {}
 
@@ -146,7 +164,7 @@ class ReplayEngine:
             # Pass A: update history/SMA/context for all bars in this timestamp batch first.
             for key, row in batch_rows:
                 symbol, timeframe = key
-                bar_ts = _to_utc_timestamp(row.ts)
+                bar_ts = to_utc_timestamp(row.ts)
                 bar = BarEvent(
                     symbol=symbol,
                     timeframe=timeframe,
@@ -163,18 +181,30 @@ class ReplayEngine:
                 if progress_callback is not None:
                     progress_callback(processed_bars, total_bars, symbol, timeframe, bar_ts)
 
-                history = history_by_key.get(key)
-                if history is None:
-                    history = _empty_history_frame()
-                history = self._append_history(history=history, bar=bar)
-                history_by_key[key] = history
+                history_buffer = history_by_key.get(key)
+                if history_buffer is None:
+                    history_buffer = RollingBarBuffer(self._history_window)
+                    history_by_key[key] = history_buffer
+                history_buffer.append(
+                    ts=bar.ts,
+                    open_=bar.open,
+                    high=bar.high,
+                    low=bar.low,
+                    close=bar.close,
+                    volume=bar.volume,
+                    label=f"{bar.symbol}/{bar.timeframe}",
+                )
+                history = history_buffer.to_frame()
 
                 sma_states = self.sma_engine.update(
                     symbol=bar.symbol,
                     timeframe=bar.timeframe,
                     ts=bar.ts,
-                    source_value=_strategy_source_value(
-                        bar=bar,
+                    source_value=strategy_source_value(
+                        open_=bar.open,
+                        high=bar.high,
+                        low=bar.low,
+                        close=bar.close,
                         price_basis=self.settings.strategy.price_basis,
                     ),
                 )
@@ -257,32 +287,6 @@ class ReplayEngine:
             summary=summary,
         )
 
-    def _append_history(self, history: pd.DataFrame, bar: BarEvent) -> pd.DataFrame:
-        ts = _to_utc_timestamp(bar.ts)
-        if not history.empty:
-            last_ts = _to_utc_timestamp(history.iloc[-1]["ts"])
-            if ts <= last_ts:
-                if ts == last_ts:
-                    raise RuntimeError(
-                        f"Duplicate replay bar timestamp for {bar.symbol}/{bar.timeframe}: {ts.isoformat()}"
-                    )
-                raise RuntimeError(
-                    f"Non-monotonic replay bar timestamp for {bar.symbol}/{bar.timeframe}: "
-                    f"{ts.isoformat()} < {last_ts.isoformat()}"
-                )
-
-        history.loc[len(history)] = {
-            "ts": ts,
-            "open": bar.open,
-            "high": bar.high,
-            "low": bar.low,
-            "close": bar.close,
-            "volume": bar.volume,
-        }
-        if len(history) > self._history_window:
-            history = history.iloc[-self._history_window :].reset_index(drop=True)
-        return history
-
     def _archive_signal(
         self,
         strike: StrikeEvent,
@@ -306,45 +310,6 @@ class ReplayEngine:
             ts=strike.bar_ts,
         )
 
-    def _preflight_cross_context_execution_pairs(
-        self,
-        execution_pairs: list[tuple[str, str]],
-    ) -> None:
-        selected_pairs = set(execution_pairs)
-        violations: list[str] = []
-        for route in self.settings.strategy.routes:
-            route_pair = (route.symbol, route.timeframe)
-            if route_pair not in selected_pairs:
-                continue
-            cross_context = route.cross_symbol_context
-            if not cross_context.enabled:
-                continue
-            for rule in cross_context.rules:
-                reference_route = self._routes_by_id.get(rule.reference_route_id)
-                if reference_route is None:
-                    raise RuntimeError(
-                        "Cross-symbol context preflight failed for replay: route '{}' "
-                        "references unknown route_id '{}'".format(
-                            route.id,
-                            rule.reference_route_id,
-                        )
-                    )
-                reference_pair = (reference_route.symbol, reference_route.timeframe)
-                if reference_pair not in selected_pairs:
-                    violations.append(
-                        "{} requires {} ({}/{})".format(
-                            route.id,
-                            rule.reference_route_id,
-                            reference_pair[0],
-                            reference_pair[1],
-                        )
-                    )
-        if violations:
-            raise RuntimeError(
-                "Cross-symbol context preflight failed for replay: selected symbols/timeframes "
-                "omit required reference route pairs ({}).".format("; ".join(violations))
-            )
-
     @staticmethod
     def _next_batch_timestamp(
         *,
@@ -356,7 +321,7 @@ class ReplayEngine:
             pointer = pointers[key]
             if pointer >= len(bars):
                 continue
-            candidate = _to_utc_timestamp(bars.iloc[pointer]["ts"])
+            candidate = to_utc_timestamp(bars.iloc[pointer]["ts"])
             if next_ts is None or candidate < next_ts:
                 next_ts = candidate
         return next_ts
@@ -374,7 +339,7 @@ class ReplayEngine:
             pointer = pointers[key]
             if pointer >= len(bars):
                 continue
-            candidate_ts = _to_utc_timestamp(bars.iloc[pointer]["ts"])
+            candidate_ts = to_utc_timestamp(bars.iloc[pointer]["ts"])
             if candidate_ts != ts:
                 continue
             batch_rows.append((key, bars.iloc[pointer]))
@@ -392,88 +357,6 @@ class ReplayEngine:
         if cached is None:
             return None
         cached_ts, context = cached
-        if cached_ts <= _to_utc_timestamp(bar_ts):
+        if cached_ts <= to_utc_timestamp(bar_ts):
             return context
         return None
-
-    @staticmethod
-    def _resolve_outfits_path(outfits_path: str) -> Path:
-        candidate = Path(outfits_path)
-        if not candidate.exists():
-            raise FileNotFoundError(
-                "Configured outfits catalog path does not exist: "
-                f"{candidate}"
-            )
-        if not candidate.is_file():
-            raise FileNotFoundError(
-                "Configured outfits catalog path is not a file: "
-                f"{candidate}"
-            )
-        return candidate
-
-    def _resolve_execution_pairs(
-        self,
-        symbols: list[str],
-        timeframes: list[str],
-    ) -> list[tuple[str, str]]:
-        normalized_symbols = [symbol.upper() for symbol in symbols]
-        if not self.settings.strategy.strict_routing:
-            return [
-                (symbol, timeframe)
-                for symbol in normalized_symbols
-                for timeframe in timeframes
-            ]
-
-        configured_routes = self.settings.strategy.routes
-        configured_symbols = {route.symbol for route in configured_routes}
-        configured_timeframes = {route.timeframe for route in configured_routes}
-        selected = [
-            (route.symbol, route.timeframe)
-            for route in configured_routes
-            if route.symbol in normalized_symbols and route.timeframe in timeframes
-        ]
-        if not selected:
-            raise RuntimeError(
-                "Strict routing preflight failed for replay: requested symbols/timeframes "
-                "do not match any configured route."
-            )
-
-        missing_symbols = sorted(set(normalized_symbols).difference(configured_symbols))
-        missing_timeframes = sorted(set(timeframes).difference(configured_timeframes))
-        if missing_symbols or missing_timeframes:
-            details: list[str] = []
-            if missing_symbols:
-                details.append("symbols=" + ",".join(missing_symbols))
-            if missing_timeframes:
-                details.append("timeframes=" + ",".join(missing_timeframes))
-            raise RuntimeError(
-                "Strict routing preflight failed for replay: requested values outside configured "
-                "routes (" + "; ".join(details) + ")."
-            )
-
-        unique_pairs: list[tuple[str, str]] = []
-        seen: set[tuple[str, str]] = set()
-        for pair in selected:
-            if pair not in seen:
-                seen.add(pair)
-                unique_pairs.append(pair)
-        return unique_pairs
-
-
-def _to_utc_timestamp(value: object) -> pd.Timestamp:
-    ts = pd.Timestamp(value)
-    if ts.tzinfo is None:
-        return ts.tz_localize("UTC")
-    return ts.tz_convert("UTC")
-
-
-def _empty_history_frame() -> pd.DataFrame:
-    return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
-
-
-def _strategy_source_value(bar: BarEvent, price_basis: str) -> float:
-    if price_basis == "close":
-        return bar.close
-    if price_basis == "ohlc4":
-        return (bar.open + bar.high + bar.low + bar.close) / 4.0
-    raise RuntimeError(f"Unsupported strategy.price_basis '{price_basis}'")

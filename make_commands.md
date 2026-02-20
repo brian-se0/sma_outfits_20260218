@@ -13,12 +13,13 @@ This file documents the Make targets that remain in this repository and the flag
 | `make discover-range` | Discover earliest available bars and write readiness range manifest. | `CONFIG`, `SYMBOLS`, `TIMEFRAMES`, `UNIVERSE`, `TIMEFRAME_SET`, `DISCOVER_START`, `READINESS_END`, `DISCOVER_RANGE_OUTPUT` |
 | `make verify-readiness` | Verify readiness acceptance checks and write JSON summary. | `CONFIG`, `START`, `END`, `SYMBOLS`, `TIMEFRAMES`, `UNIVERSE`, `TIMEFRAME_SET`, `READINESS_ACCEPTANCE_OUTPUT` |
 | `make test` | Run the test suite. | None |
+| `make dead-code-check` | Run dead-code gate via `vulture`. | None |
 | `make backfill` | Backfill bars for selected symbols/timeframes/date range. | `CONFIG`, `START`, `END`, `SYMBOLS`, `TIMEFRAMES`, `UNIVERSE`, `TIMEFRAME_SET`, `PROFILE` |
 | `make replay` | Replay routes/signals for selected symbols/timeframes/date range. | `CONFIG`, `START`, `END`, `SYMBOLS`, `TIMEFRAMES`, `UNIVERSE`, `TIMEFRAME_SET`, `PROFILE` |
 | `make run-live` | Run live execution path. | `CONFIG` |
-| `make report` | Build report artifacts. | `CONFIG`, `REPORT_RANGE`, `REPORT_ATTRIBUTION` |
+| `make report` | Build report artifacts. | `CONFIG`, `REPORT_RANGE` |
 | `make preflight-storage` | Check free disk space for large profiles before heavy runs. | `PROFILE`, `MIN_FREE_GB` |
-| `make e2e` | End-to-end orchestrator for `validate-config`, `backfill`, `replay`, `report` by stage. | `CONFIG`, `PROFILE`, `STAGES`, `UNIVERSE`, `TIMEFRAME_SET`, `START`, `END`, `SYMBOLS`, `TIMEFRAMES`, `ANALYSIS_START`, `ANALYSIS_END`, `WARMUP_DAYS`, `BACKFILL_START`, `BACKFILL_END`, `REPLAY_START`, `REPLAY_END`, `REPORT_RANGE`, `REPORT_ATTRIBUTION`, `MIN_FREE_GB` |
+| `make e2e` | End-to-end orchestrator for `validate-config`, `backfill`, `replay`, `report` by stage. | `CONFIG`, `PROFILE`, `STAGES`, `UNIVERSE`, `TIMEFRAME_SET`, `START`, `END`, `SYMBOLS`, `TIMEFRAMES`, `ANALYSIS_START`, `ANALYSIS_END`, `WARMUP_DAYS`, `BACKFILL_START`, `BACKFILL_END`, `REPLAY_START`, `REPLAY_END`, `REPORT_RANGE`, `MIN_FREE_GB` |
 | `make clean` | Remove artifacts, caches, and build outputs (keeps `.venv`). | None |
 | `make clean-all` | Run `clean` and also remove `.venv`. | None |
 
@@ -57,7 +58,6 @@ This file documents the Make targets that remain in this repository and the flag
 - `REPORT_RANGE`: `start,end` window for `report`.
   - For standalone `make report`, passed directly.
   - For `make e2e`, defaults to `ANALYSIS_START,ANALYSIS_END` if unset.
-- `REPORT_ATTRIBUTION`: `strike`, `close`, or `both`.
 - `FEATURES`: Explicitly validated feature flags. `cross_symbol_context` is intentionally rejected at runtime; use config key `route.cross_symbol_context`.
 
 ### Readiness-specific flags

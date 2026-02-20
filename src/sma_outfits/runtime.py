@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import platform
 import sys
-from pathlib import Path
 
 EXPECTED_PYTHON = (3, 14, 3)
-EXPECTED_TIMEZONE = "America/New_York"
-ENV_LOCAL_PATH = Path(".env.local")
 
 
 def assert_python_runtime() -> None:

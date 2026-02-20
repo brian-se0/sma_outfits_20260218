@@ -128,7 +128,6 @@ REPLAY_START ?= $(WARMUP_START)
 REPLAY_END ?= $(ANALYSIS_END)
 DEFAULT_REPORT_RANGE := $(ANALYSIS_START),$(ANALYSIS_END)
 REPORT_RANGE ?=
-REPORT_ATTRIBUTION ?= both
 REPORT_RANGE_FOR_E2E := $(if $(strip $(REPORT_RANGE)),$(REPORT_RANGE),$(DEFAULT_REPORT_RANGE))
 
 BACKFILL_SYMBOLS_ARG := $(if $(strip $(SYMBOLS)),--symbols $(SYMBOLS),)
@@ -136,14 +135,12 @@ BACKFILL_TIMEFRAMES_ARG := $(if $(strip $(TIMEFRAMES)),--timeframes $(TIMEFRAMES
 REPLAY_SYMBOLS_ARG := $(if $(strip $(SYMBOLS)),--symbols $(SYMBOLS),)
 REPLAY_TIMEFRAMES_ARG := $(if $(strip $(TIMEFRAMES)),--timeframes $(TIMEFRAMES),)
 REPORT_RANGE_ARG := $(if $(strip $(REPORT_RANGE)),--range $(REPORT_RANGE),)
-REPORT_ATTRIBUTION_ARG := $(if $(strip $(REPORT_ATTRIBUTION)),--attribution $(REPORT_ATTRIBUTION),)
 E2E_REPORT_RANGE_ARG := $(if $(strip $(REPORT_RANGE_FOR_E2E)),--range $(REPORT_RANGE_FOR_E2E),)
-E2E_REPORT_ATTRIBUTION_ARG := $(if $(strip $(REPORT_ATTRIBUTION)),--attribution $(REPORT_ATTRIBUTION),)
 
-.PHONY: help venv install validate-config discover-range verify-readiness test backfill replay run-live report preflight-storage e2e clean clean-all
+.PHONY: help venv install validate-config discover-range verify-readiness test dead-code-check backfill replay run-live report preflight-storage e2e clean clean-all
 
 help:
-	powershell -NoProfile -Command "Write-Output 'Targets:'; Write-Output '  make validate-config'; Write-Output '  make discover-range'; Write-Output '  make verify-readiness'; Write-Output '  make test'; Write-Output '  make backfill'; Write-Output '  make replay'; Write-Output '  make run-live'; Write-Output '  make report'; Write-Output '  make e2e'; Write-Output '  make clean'; Write-Output '  make clean-all'; Write-Output ''; Write-Output 'Common variables:'; Write-Output '  CONFIG=...'; Write-Output '  PROFILE=smoke|day|week|month|max|custom'; Write-Output '  UNIVERSE=core|core_expanded|all_stocks|all'; Write-Output '  START=... END=... (required when PROFILE=custom)'; Write-Output '  SYMBOLS=CSV'; Write-Output '  TIMEFRAMES=CSV'; Write-Output '  STAGES=validate-config,backfill,replay,report'; Write-Output '  FEATURES=cross_symbol_context (rejected; not a runtime flag, use config route.cross_symbol_context)'; Write-Output '  DISCOVER_RANGE_OUTPUT=...'; Write-Output '  FULL_RANGE_START=... READINESS_END=...'; Write-Output '  ANALYSIS_START=... ANALYSIS_END=... WARMUP_DAYS=...'; Write-Output '  REPORT_RANGE=start,end REPORT_ATTRIBUTION=strike|close|both'; Write-Output ''; Write-Output 'Examples:'; Write-Output '  make discover-range CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml UNIVERSE=all_stocks TIMEFRAME_SET=all'; Write-Output '  make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all STAGES=validate-config,backfill'; Write-Output '  make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all TIMEFRAME_SET=all STAGES=replay,report'; Write-Output '  make verify-readiness CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all'"
+	powershell -NoProfile -Command "Write-Output 'Targets:'; Write-Output '  make validate-config'; Write-Output '  make discover-range'; Write-Output '  make verify-readiness'; Write-Output '  make test'; Write-Output '  make dead-code-check'; Write-Output '  make backfill'; Write-Output '  make replay'; Write-Output '  make run-live'; Write-Output '  make report'; Write-Output '  make e2e'; Write-Output '  make clean'; Write-Output '  make clean-all'; Write-Output ''; Write-Output 'Common variables:'; Write-Output '  CONFIG=...'; Write-Output '  PROFILE=smoke|day|week|month|max|custom'; Write-Output '  UNIVERSE=core|core_expanded|all_stocks|all'; Write-Output '  START=... END=... (required when PROFILE=custom)'; Write-Output '  SYMBOLS=CSV'; Write-Output '  TIMEFRAMES=CSV'; Write-Output '  STAGES=validate-config,backfill,replay,report'; Write-Output '  FEATURES=cross_symbol_context (rejected; not a runtime flag, use config route.cross_symbol_context)'; Write-Output '  DISCOVER_RANGE_OUTPUT=...'; Write-Output '  FULL_RANGE_START=... READINESS_END=...'; Write-Output '  ANALYSIS_START=... ANALYSIS_END=... WARMUP_DAYS=...'; Write-Output '  REPORT_RANGE=start,end'; Write-Output ''; Write-Output 'Examples:'; Write-Output '  make discover-range CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml UNIVERSE=all_stocks TIMEFRAME_SET=all'; Write-Output '  make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all STAGES=validate-config,backfill'; Write-Output '  make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all TIMEFRAME_SET=all STAGES=replay,report'; Write-Output '  make verify-readiness CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all'"
 
 venv:
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; if (!(Test-Path '$(PYTHON)')) { py -3.14 -m venv $(VENV) }; if (!(Test-Path '$(VENV)\\Scripts\\pip.exe')) { & '$(PYTHON)' -m ensurepip --upgrade --default-pip }"
@@ -167,6 +164,9 @@ verify-readiness: install
 test: install
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp\\pytest' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; & '$(PYTHON)' -m pytest"
 
+dead-code-check: install
+	$(PYTHON) -m vulture src --min-confidence 90 --ignore-names cls,settings_cls,init_settings,env_settings,file_secret_settings
+
 backfill: install
 	$(PYTHON) -m sma_outfits.cli backfill --config $(CONFIG) $(BACKFILL_SYMBOLS_ARG) --start $(START) --end $(END) $(BACKFILL_TIMEFRAMES_ARG)
 
@@ -177,17 +177,17 @@ run-live: install
 	$(PYTHON) -m sma_outfits.cli run-live --config $(CONFIG)
 
 report: install
-	$(PYTHON) -m sma_outfits.cli report --config $(CONFIG) $(REPORT_RANGE_ARG) $(REPORT_ATTRIBUTION_ARG)
+	$(PYTHON) -m sma_outfits.cli report --config $(CONFIG) $(REPORT_RANGE_ARG)
 
 preflight-storage:
 	powershell -NoProfile -Command "$$profile='$(PROFILE)'; $$largeProfiles=@('week','month','max','custom'); if (-not ($$largeProfiles -contains $$profile)) { Write-Output ('storage preflight: skipped for PROFILE=' + $$profile); exit 0 }; $$targetPath = [System.IO.Path]::GetFullPath('$(CURDIR)'); $$root = [System.IO.Path]::GetPathRoot($$targetPath); if ([string]::IsNullOrWhiteSpace($$root)) { throw ('Unable to resolve path root for ' + $$targetPath) }; $$driveInfo = [System.IO.DriveInfo]::new($$root); $$freeBytes = [int64]$$driveInfo.AvailableFreeSpace; $$thresholdGb = [double]'$(MIN_FREE_GB)'; $$thresholdBytes = [int64]($$thresholdGb * 1GB); if ($$freeBytes -lt $$thresholdBytes) { throw ('Insufficient free disk space for PROFILE=' + $$profile + ': free=' + $$freeBytes + ' bytes, required>=' + $$thresholdBytes + ' bytes (MIN_FREE_GB=' + $$thresholdGb + ')') }; Write-Output ('storage preflight: ok PROFILE=' + $$profile + ' free_bytes=' + $$freeBytes + ' threshold_bytes=' + $$thresholdBytes + ' root=' + $$root)"
 
 e2e: preflight-storage
-	powershell -NoProfile -Command "Write-Output ('e2e config: profile=$(PROFILE) stages=$(STAGES_NORMALIZED) symbols=$(SYMBOLS) timeframes=$(TIMEFRAMES) analysis_start=$(ANALYSIS_START) analysis_end=$(ANALYSIS_END) warmup_days=$(WARMUP_DAYS) warmup_start=$(WARMUP_START) backfill_start=$(BACKFILL_START) backfill_end=$(BACKFILL_END) replay_start=$(REPLAY_START) replay_end=$(REPLAY_END) report_range=$(REPORT_RANGE_FOR_E2E) report_attribution=$(REPORT_ATTRIBUTION)')"
+	powershell -NoProfile -Command "Write-Output ('e2e config: profile=$(PROFILE) stages=$(STAGES_NORMALIZED) symbols=$(SYMBOLS) timeframes=$(TIMEFRAMES) analysis_start=$(ANALYSIS_START) analysis_end=$(ANALYSIS_END) warmup_days=$(WARMUP_DAYS) warmup_start=$(WARMUP_START) backfill_start=$(BACKFILL_START) backfill_end=$(BACKFILL_END) replay_start=$(REPLAY_START) replay_end=$(REPLAY_END) report_range=$(REPORT_RANGE_FOR_E2E)')"
 	$(if $(call has_stage,validate-config),$(PYTHON) -m sma_outfits.cli validate-config --config $(CONFIG),powershell -NoProfile -Command "Write-Output 'e2e skip: validate-config'")
 	$(if $(call has_stage,backfill),$(PYTHON) -m sma_outfits.cli backfill --config $(CONFIG) $(BACKFILL_SYMBOLS_ARG) --start $(BACKFILL_START) --end $(BACKFILL_END) $(BACKFILL_TIMEFRAMES_ARG),powershell -NoProfile -Command "Write-Output 'e2e skip: backfill'")
 	$(if $(call has_stage,replay),$(PYTHON) -m sma_outfits.cli replay --config $(CONFIG) --start $(REPLAY_START) --end $(REPLAY_END) $(REPLAY_SYMBOLS_ARG) $(REPLAY_TIMEFRAMES_ARG),powershell -NoProfile -Command "Write-Output 'e2e skip: replay'")
-	$(if $(call has_stage,report),$(PYTHON) -m sma_outfits.cli report --config $(CONFIG) $(E2E_REPORT_RANGE_ARG) $(E2E_REPORT_ATTRIBUTION_ARG),powershell -NoProfile -Command "Write-Output 'e2e skip: report'")
+	$(if $(call has_stage,report),$(PYTHON) -m sma_outfits.cli report --config $(CONFIG) $(E2E_REPORT_RANGE_ARG),powershell -NoProfile -Command "Write-Output 'e2e skip: report'")
 	powershell -NoProfile -Command "Write-Output 'e2e complete'"
 
 clean:

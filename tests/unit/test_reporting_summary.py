@@ -160,8 +160,11 @@ def test_build_summary_from_records_applies_time_range() -> None:
         end=pd.Timestamp("2025-01-02T23:59:59Z"),
     )
 
-    assert summary["closed_positions"] == 1
-    assert summary["hit_rate"] == 1.0
+    assert summary["attribution_mode"] == "both"
+    assert summary["strike_attribution"]["closed_positions"] == 1
+    assert summary["strike_attribution"]["hit_rate"] == 1.0
+    assert summary["close_attribution"]["closed_positions"] == 0
+    assert summary["close_attribution"]["hit_rate"] == 0.0
 
 
 def test_build_summary_fails_when_signal_references_missing_strike() -> None:
@@ -188,7 +191,7 @@ def test_breakdown_fails_when_label_key_missing() -> None:
         _r_breakdown(rows=[{"realized_r": 1.0}], key="signal_type")
 
 
-def test_build_summary_from_records_both_mode_keeps_strike_top_level_and_adds_close_payload() -> None:
+def test_build_summary_from_records_both_mode_uses_explicit_strike_and_close_payloads() -> None:
     strike = StrikeEvent(
         id="strike-old",
         symbol="SPY",
@@ -231,12 +234,13 @@ def test_build_summary_from_records_both_mode_keeps_strike_top_level_and_adds_cl
     )
 
     assert summary["attribution_mode"] == "both"
-    assert summary["closed_positions"] == 0
+    assert "closed_positions" not in summary
+    assert summary["strike_attribution"]["closed_positions"] == 0
     assert summary["close_attribution"]["closed_positions"] == 1
     assert summary["close_attribution"]["total_signals"] == 1
 
 
-def test_build_summary_from_records_close_mode_uses_close_totals_top_level() -> None:
+def test_build_summary_from_records_rejects_non_both_mode() -> None:
     strike = StrikeEvent(
         id="strike-old",
         symbol="SPY",
@@ -269,19 +273,15 @@ def test_build_summary_from_records_close_mode_uses_close_totals_top_level() -> 
         ts=datetime(2025, 1, 2, 14, 35, tzinfo=timezone.utc),
     )
 
-    summary = build_summary_from_records(
-        strike_rows=[event_to_record(strike)],
-        signal_rows=[event_to_record(signal)],
-        position_rows=[event_to_record(close_event)],
-        start=pd.Timestamp("2025-01-02T00:00:00Z"),
-        end=pd.Timestamp("2025-01-02T23:59:59Z"),
-        attribution_mode="close",
-    )
-
-    assert summary["attribution_mode"] == "close"
-    assert summary["closed_positions"] == 1
-    assert summary["total_signals"] == 1
-    assert summary["close_attribution"]["closed_positions"] == 1
+    with pytest.raises(ValueError, match="Expected: both"):
+        build_summary_from_records(
+            strike_rows=[event_to_record(strike)],
+            signal_rows=[event_to_record(signal)],
+            position_rows=[event_to_record(close_event)],
+            start=pd.Timestamp("2025-01-02T00:00:00Z"),
+            end=pd.Timestamp("2025-01-02T23:59:59Z"),
+            attribution_mode="close",  # type: ignore[arg-type]
+        )
 
 
 def test_write_summary_report_both_mode_adds_close_columns_and_sections(tmp_path) -> None:
@@ -329,6 +329,7 @@ def test_write_summary_report_both_mode_adds_close_columns_and_sections(tmp_path
 
     csv = pd.read_csv(csv_path)
     assert "attribution_mode" in csv.columns
+    assert "strike_total_signals" in csv.columns
     assert "close_total_signals" in csv.columns
     assert str(csv.iloc[0]["attribution_mode"]) == "both"
 

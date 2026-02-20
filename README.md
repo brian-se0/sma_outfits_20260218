@@ -2,6 +2,14 @@
 
 Explicit analysis of SMA outfit (blackbox) use in public equity markets for real-time insight into wealth distribution and direct stock market control. A call for transparency and public discourse.
 
+## Implementation Contract (Current Code)
+
+- Runtime/data provider: Alpaca-only ingestion and execution paths.
+- Config contract: no legacy `strategy.mode`; behavior is route/config driven.
+- Reporting contract: canonical `both` attribution only (`strike_attribution` + `close_attribution`).
+- Live/replay parity: `atr_dynamic_stop` and `cross_symbol_context` are supported in both modes.
+- Fallback code paths (stream reconnect/stale-feed recovery/idempotent duplicate handling) are intentionally preserved.
+
 ## Repository Structure
 This repository is organized to provide a comprehensive understanding of SMA (Simple Moving Average) outfits and their direct impact on market dynamics. Each directory contains specific resources tailored to different aspects of SMA analysis:
 

@@ -27,21 +27,6 @@ def test_report_writes_zero_summary_when_no_stored_events(settings, monkeypatch,
     assert (Path(settings.archive.root) / "reports" / "all_time.csv").exists()
 
 
-def test_report_supports_close_attribution_option(settings, monkeypatch, capsys) -> None:
-    monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
-    monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: settings)
-
-    cli.report(
-        config=Path("configs/settings.example.yaml"),
-        date=None,
-        range_=None,
-        attribution=cli.ReportAttributionMode.close,
-    )
-
-    output = capsys.readouterr().out
-    assert '"attribution_mode": "close"' in output
-
-
 def test_resolve_report_range_accepts_comma_for_full_timestamps() -> None:
     start, end = cli._resolve_report_range(
         date=None,

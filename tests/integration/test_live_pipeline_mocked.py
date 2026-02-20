@@ -50,6 +50,22 @@ class MalformedStreamFactory:
         return _generator()
 
 
+class CrossContextStreamFactory:
+    def __call__(self, market: str, symbols: list[str]):
+        async def _generator():
+            if market != "stocks":
+                while True:
+                    await asyncio.sleep(1.0)
+            yield _bar("QQQ", "2025-01-02T14:30:00Z", 200.0)
+            yield _bar("SPY", "2025-01-02T14:30:00Z", 100.0)
+            yield _bar("QQQ", "2025-01-02T14:31:00Z", 201.0)
+            yield _bar("SPY", "2025-01-02T14:31:00Z", 101.0)
+            while True:
+                await asyncio.sleep(1.0)
+
+        return _generator()
+
+
 def _live_settings_with_routes(
     settings,
     tmp_path: Path,
@@ -72,7 +88,7 @@ def _live_settings_with_routes(
     )
     live_settings = settings.model_copy(deep=True)
     live_settings.outfits_path = str(outfits_path)
-    live_settings.universe.symbols = ["SPY"]
+    live_settings.universe.symbols = list(dict.fromkeys([route.symbol for route in routes]))
     live_settings.timeframes.live = ["1m"]
     live_settings.archive.enabled = False
     live_settings.sessions.regular_only = False
@@ -224,7 +240,7 @@ def test_live_pipeline_fails_fast_on_malformed_stream_payload(
         raise AssertionError("Expected live run to fail on malformed payload")
 
 
-def test_live_pipeline_fails_fast_when_atr_route_selected(
+def test_live_pipeline_supports_atr_route_selected(
     settings,
     tmp_path: Path,
 ) -> None:
@@ -242,7 +258,7 @@ def test_live_pipeline_fails_fast_when_atr_route_selected(
             macro_gate="none",
             risk_mode="atr_dynamic_stop",
             stop_offset=0.01,
-            atr={"period": 14, "multiplier": 1.5},
+            atr={"period": 1, "multiplier": 1.5},
         )
     ]
     live_settings = _live_settings_with_routes(settings, tmp_path, routes)
@@ -253,26 +269,36 @@ def test_live_pipeline_fails_fast_when_atr_route_selected(
         stream_factory=MockStreamFactory(),
     )
 
-    try:
-        asyncio.run(
-            runner.run(
-                symbols=["SPY"],
-                timeframes=["1m"],
-                runtime_seconds=0.3,
-                warmup_minutes=0,
-            )
+    result = asyncio.run(
+        runner.run(
+            symbols=["SPY"],
+            timeframes=["1m"],
+            runtime_seconds=1.0,
+            warmup_minutes=0,
         )
-    except RuntimeError as exc:
-        assert "atr_dynamic_stop is replay-only in v1" in str(exc)
-    else:
-        raise AssertionError("Expected live run to fail for replay-only ATR route")
+    )
+    assert result.bars_received >= 1
 
 
-def test_live_pipeline_fails_fast_when_cross_symbol_context_route_selected(
+def test_live_pipeline_supports_cross_symbol_context_route_selected(
     settings,
     tmp_path: Path,
 ) -> None:
     routes = [
+        RouteRule(
+            id="qqq_1m_ref",
+            symbol="QQQ",
+            timeframe="1m",
+            outfit_id="test_outfit",
+            key_period=1,
+            side="LONG",
+            signal_type="optimized_buy",
+            micro_periods=[1],
+            ignore_close_below_key_when_micro_positive=False,
+            macro_gate="none",
+            risk_mode="singular_penny_only",
+            stop_offset=0.01,
+        ),
         RouteRule(
             id="spy_1m_cross",
             symbol="SPY",
@@ -303,22 +329,21 @@ def test_live_pipeline_fails_fast_when_cross_symbol_context_route_selected(
     runner = LiveRunner(
         settings=live_settings,
         storage=storage,
-        stream_factory=MockStreamFactory(),
+        stream_factory=CrossContextStreamFactory(),
     )
 
-    try:
-        asyncio.run(
-            runner.run(
-                symbols=["SPY"],
-                timeframes=["1m"],
-                runtime_seconds=0.3,
-                warmup_minutes=0,
-            )
+    result = asyncio.run(
+        runner.run(
+            symbols=["QQQ", "SPY"],
+            timeframes=["1m"],
+            runtime_seconds=0.5,
+            warmup_minutes=0,
         )
-    except RuntimeError as exc:
-        assert "cross_symbol_context is replay-only in v1" in str(exc)
-    else:
-        raise AssertionError("Expected live run to fail for replay-only cross-symbol context")
+    )
+
+    assert result.bars_received >= 2
+    signals = storage.load_events("signals")
+    assert any(signal["route_id"] == "spy_1m_cross" for signal in signals)
 
 
 def _bar(symbol: str, ts: str, close: float) -> LiveBar:

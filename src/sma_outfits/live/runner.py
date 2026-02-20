@@ -21,7 +21,6 @@ from sma_outfits.data.alpaca_clients import (
     StreamHeartbeatError,
     StreamStaleError,
 )
-from sma_outfits.data.resample import resample_ohlcv
 from sma_outfits.data.storage import StorageManager
 from sma_outfits.events import (
     ArchiveRecord,
@@ -31,10 +30,20 @@ from sma_outfits.events import (
     StrikeEvent,
     event_to_record,
 )
+from sma_outfits.execution import (
+    IncrementalTimeframeAggregator,
+    RollingBarBuffer,
+    SourceBarWindow,
+    preflight_cross_symbol_context_execution_pairs,
+    resolve_execution_scope,
+    resolve_outfits_path,
+    strategy_source_value,
+    to_utc_timestamp,
+)
 from sma_outfits.indicators.sma_engine import SMAEngine
 from sma_outfits.reporting.summary import build_summary
 from sma_outfits.risk.manager import ManagedPosition, RiskManager
-from sma_outfits.signals.detector import StrikeDetector, load_outfits
+from sma_outfits.signals.detector import RouteBarContext, StrikeDetector, load_outfits
 from sma_outfits.utils import (
     apply_regular_session_filter,
     ensure_utc_timestamp,
@@ -73,7 +82,7 @@ class LiveRunner:
         self._logger = logging.getLogger("sma_outfits.live")
         self._stream_factory = stream_factory or self._default_stream_factory
 
-        outfits_path = self._resolve_outfits_path(settings.outfits_path)
+        outfits_path = resolve_outfits_path(settings.outfits_path)
         self._outfits = load_outfits(outfits_path)
         self._routes_by_id: dict[str, RouteRule] = {
             route.id: route for route in self.settings.strategy.routes
@@ -102,13 +111,21 @@ class LiveRunner:
 
         selected_symbols = symbols or self.settings.universe.symbols
         selected_timeframes = timeframes or self.settings.timeframes.live
-        execution_pairs = self._resolve_execution_pairs(
+        scope = resolve_execution_scope(
+            settings=self.settings,
             symbols=selected_symbols,
             timeframes=selected_timeframes,
+            command="run-live",
         )
-        self._enforce_live_risk_mode_support(execution_pairs)
-        self._enforce_live_cross_symbol_context_support(execution_pairs)
-        self._timeframes_by_symbol = _timeframes_by_symbol(execution_pairs)
+        execution_pairs = scope.execution_pairs
+        preflight_cross_symbol_context_execution_pairs(
+            routes_by_id=self._routes_by_id,
+            routes=self.settings.strategy.routes,
+            execution_pairs=execution_pairs,
+            command="run-live",
+        )
+        self._timeframes_by_symbol = scope.timeframes_by_symbol
+        self._initialize_timeframe_aggregators(execution_pairs)
         selected_symbols = list(self._timeframes_by_symbol.keys())
         effective_runtime = (
             runtime_minutes if runtime_minutes is not None else self.settings.live.runtime_minutes
@@ -269,7 +286,19 @@ class LiveRunner:
                 ):
                     return
 
-            accepted = self._append_source_bar(symbol, live_bar)
+            source_window = self._source_windows_by_symbol.get(symbol)
+            if source_window is None:
+                source_window = SourceBarWindow(self._source_window)
+                self._source_windows_by_symbol[symbol] = source_window
+            accepted = source_window.append(
+                ts=live_bar.ts,
+                open_=live_bar.open,
+                high=live_bar.high,
+                low=live_bar.low,
+                close=live_bar.close,
+                volume=live_bar.volume,
+                symbol=symbol,
+            )
             if not accepted:
                 self._duplicate_bars_skipped += 1
                 return
@@ -292,119 +321,51 @@ class LiveRunner:
                     f"{symbol}"
                 )
             for timeframe in timeframes:
-                next_bar = self._next_completed_timeframe_bar(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    source_ts=live_bar.ts,
+                if timeframe == "1m":
+                    self._bars_processed += 1
+                    self._process_strategy_bar(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        ts=live_bar.ts,
+                        open_=live_bar.open,
+                        high=live_bar.high,
+                        low=live_bar.low,
+                        close=live_bar.close,
+                        volume=live_bar.volume,
+                        source=live_bar.source,
+                        persist_bar=False,
+                    )
+                    continue
+
+                aggregator = self._aggregators_by_key.get((symbol, timeframe))
+                if aggregator is None:
+                    raise RuntimeError(
+                        f"Missing live aggregator for execution pair {symbol}/{timeframe}"
+                    )
+                completed_bar = aggregator.update(
+                    ts=live_bar.ts,
+                    open_=live_bar.open,
+                    high=live_bar.high,
+                    low=live_bar.low,
+                    close=live_bar.close,
+                    volume=live_bar.volume,
                 )
-                if next_bar is None:
+                if completed_bar is None:
                     continue
                 self._bars_processed += 1
                 self._process_strategy_bar(
                     symbol=symbol,
                     timeframe=timeframe,
-                    ts=next_bar["ts"],
-                    open_=next_bar["open"],
-                    high=next_bar["high"],
-                    low=next_bar["low"],
-                    close=next_bar["close"],
-                    volume=next_bar["volume"],
+                    ts=to_utc_timestamp(completed_bar["ts"]),
+                    open_=float(completed_bar["open"]),
+                    high=float(completed_bar["high"]),
+                    low=float(completed_bar["low"]),
+                    close=float(completed_bar["close"]),
+                    volume=float(completed_bar["volume"]),
                     source=live_bar.source,
-                    persist_bar=timeframe != "1m",
+                    persist_bar=True,
                 )
             self._emit_progress()
-
-    def _append_source_bar(self, symbol: str, live_bar: LiveBar) -> bool:
-        frame = self._source_1m_by_symbol.get(symbol)
-        if frame is None:
-            frame = _empty_bar_frame()
-
-        existing = frame.loc[frame["ts"] == live_bar.ts]
-        if not existing.empty:
-            row = existing.iloc[-1]
-            if _bar_matches(
-                row,
-                live_bar.open,
-                live_bar.high,
-                live_bar.low,
-                live_bar.close,
-                live_bar.volume,
-            ):
-                return False
-            raise RuntimeError(
-                "Conflicting duplicate bar detected for "
-                f"{symbol} at {live_bar.ts.isoformat()}"
-            )
-
-        if not frame.empty:
-            last_ts = pd.Timestamp(frame["ts"].iloc[-1]).tz_convert("UTC")
-            if live_bar.ts < last_ts:
-                raise RuntimeError(
-                    f"Non-monotonic live bar timestamp for {symbol}: "
-                    f"{live_bar.ts.isoformat()} < {last_ts.isoformat()}"
-                )
-
-        frame.loc[len(frame)] = {
-            "ts": live_bar.ts,
-            "open": live_bar.open,
-            "high": live_bar.high,
-            "low": live_bar.low,
-            "close": live_bar.close,
-            "volume": live_bar.volume,
-        }
-        if len(frame) > self._source_window:
-            frame = frame.iloc[-self._source_window :].reset_index(drop=True)
-        self._source_1m_by_symbol[symbol] = frame
-        self._proxy_prices[symbol] = live_bar.close
-        return True
-
-    def _next_completed_timeframe_bar(
-        self,
-        symbol: str,
-        timeframe: str,
-        source_ts: pd.Timestamp,
-    ) -> dict[str, float | pd.Timestamp] | None:
-        frame = self._source_1m_by_symbol.get(symbol)
-        if frame is None or frame.empty:
-            return None
-
-        if timeframe == "1m":
-            candidate = frame.iloc[-1]
-        else:
-            resampled = resample_ohlcv(
-                frame,
-                timeframe=timeframe,
-                timezone=self.settings.sessions.timezone,
-                anchors=self.settings.timeframes.anchors,
-            )
-            if resampled.empty:
-                return None
-            candidate = resampled.iloc[-1]
-
-        candidate_ts = pd.Timestamp(candidate["ts"]).tz_convert("UTC")
-        if candidate_ts > source_ts:
-            return None
-
-        key = (symbol, timeframe)
-        last_seen = self._last_processed_ts.get(key)
-        if last_seen is not None:
-            if candidate_ts < last_seen:
-                raise RuntimeError(
-                    "Non-monotonic resampled timestamp for "
-                    f"{symbol}/{timeframe}: {candidate_ts.isoformat()} < {last_seen.isoformat()}"
-                )
-            if candidate_ts == last_seen:
-                return None
-
-        self._last_processed_ts[key] = candidate_ts
-        return {
-            "ts": candidate_ts,
-            "open": float(candidate["open"]),
-            "high": float(candidate["high"]),
-            "low": float(candidate["low"]),
-            "close": float(candidate["close"]),
-            "volume": float(candidate["volume"]),
-        }
 
     def _process_strategy_bar(
         self,
@@ -432,16 +393,20 @@ class LiveRunner:
             )
 
         key = (symbol, timeframe)
-        history = self._append_history(
-            key=key,
+        history_buffer = self._history_by_key.get(key)
+        if history_buffer is None:
+            history_buffer = RollingBarBuffer(self._history_window)
+            self._history_by_key[key] = history_buffer
+        history_buffer.append(
             ts=ts,
             open_=open_,
             high=high,
             low=low,
             close=close,
             volume=volume,
+            label=f"{symbol}/{timeframe}",
         )
-        self._history_by_key[key] = history
+        history = history_buffer.to_frame()
 
         bar = BarEvent(
             symbol=symbol,
@@ -460,7 +425,7 @@ class LiveRunner:
             symbol=bar.symbol,
             timeframe=bar.timeframe,
             ts=bar.ts,
-            source_value=_strategy_source_value(
+            source_value=strategy_source_value(
                 open_=bar.open,
                 high=bar.high,
                 low=bar.low,
@@ -472,11 +437,17 @@ class LiveRunner:
             bar=bar,
             sma_states=sma_states,
         )
+        if route_context is not None:
+            self._latest_context_by_route_id[route_context.route.id] = (
+                to_utc_timestamp(bar.ts),
+                route_context,
+            )
         new_strikes, detected_signals = self._detector.detect(
             bar=bar,
             sma_states=sma_states,
             history=history,
             session_type="regular",
+            cross_context_lookup=self._cross_context_lookup,
         )
         new_signals = [
             self._risk_manager.prepare_signal_for_entry(
@@ -539,45 +510,6 @@ class LiveRunner:
                 self._archive_records.append(event)
         if unique_records:
             self.storage.append_events(name, unique_records)
-
-    def _append_history(
-        self,
-        key: tuple[str, str],
-        ts: pd.Timestamp,
-        open_: float,
-        high: float,
-        low: float,
-        close: float,
-        volume: float,
-    ) -> pd.DataFrame:
-        history = self._history_by_key.get(key)
-        if history is None:
-            history = _empty_bar_frame()
-
-        ts_utc = _to_utc_timestamp(ts)
-        if not history.empty:
-            last_ts = _to_utc_timestamp(history.iloc[-1]["ts"])
-            if ts_utc <= last_ts:
-                if ts_utc == last_ts:
-                    raise RuntimeError(
-                        f"Duplicate strategy bar for {key[0]}/{key[1]} at {ts_utc.isoformat()}"
-                    )
-                raise RuntimeError(
-                    f"Non-monotonic strategy bar for {key[0]}/{key[1]}: "
-                    f"{ts_utc.isoformat()} < {last_ts.isoformat()}"
-                )
-
-        history.loc[len(history)] = {
-            "ts": ts_utc,
-            "open": open_,
-            "high": high,
-            "low": low,
-            "close": close,
-            "volume": volume,
-        }
-        if len(history) > self._history_window:
-            history = history.iloc[-self._history_window :].reset_index(drop=True)
-        return history
 
     def _write_bar(
         self,
@@ -679,37 +611,57 @@ class LiveRunner:
             normalized["ts"] = pd.to_datetime(normalized["ts"], utc=True)
             normalized = normalized.sort_values("ts").drop_duplicates(subset=["ts"])
             normalized = normalized.reset_index(drop=True)
-            self._source_1m_by_symbol[symbol] = normalized
+            source_window = SourceBarWindow(self._source_window)
+            source_window.load_frame(normalized, symbol=symbol)
+            self._source_windows_by_symbol[symbol] = source_window
             self._proxy_prices[symbol] = float(normalized.iloc[-1]["close"])
 
-            last_source_ts = pd.Timestamp(normalized.iloc[-1]["ts"]).tz_convert("UTC")
             for timeframe in timeframes_by_symbol.get(symbol, []):
                 if timeframe == "1m":
                     frame = normalized
-                else:
-                    frame = resample_ohlcv(
-                        normalized,
-                        timeframe=timeframe,
-                        timezone=self.settings.sessions.timezone,
-                        anchors=self.settings.timeframes.anchors,
-                    )
-                if frame.empty:
-                    continue
-                for row in frame.itertuples(index=False):
-                    ts = pd.Timestamp(row.ts).tz_convert("UTC")
-                    if ts > last_source_ts:
+                    if frame.empty:
                         continue
-                    self._prime_strategy_bar(
-                        symbol=symbol,
-                        timeframe=timeframe,
-                        ts=ts,
+                    for row in frame.itertuples(index=False):
+                        ts = to_utc_timestamp(row.ts)
+                        self._prime_strategy_bar(
+                            symbol=symbol,
+                            timeframe=timeframe,
+                            ts=ts,
+                            open_=float(row.open),
+                            high=float(row.high),
+                            low=float(row.low),
+                            close=float(row.close),
+                            volume=float(row.volume),
+                        )
+                    continue
+
+                aggregator = self._aggregators_by_key.get((symbol, timeframe))
+                if aggregator is None:
+                    raise RuntimeError(
+                        f"Missing warmup aggregator for execution pair {symbol}/{timeframe}"
+                    )
+                for row in normalized.itertuples(index=False):
+                    completed_bar = aggregator.update(
+                        ts=row.ts,
                         open_=float(row.open),
                         high=float(row.high),
                         low=float(row.low),
                         close=float(row.close),
                         volume=float(row.volume),
                     )
-                    self._last_processed_ts[(symbol, timeframe)] = ts
+                    if completed_bar is None:
+                        continue
+                    ts = to_utc_timestamp(completed_bar["ts"])
+                    self._prime_strategy_bar(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        ts=ts,
+                        open_=float(completed_bar["open"]),
+                        high=float(completed_bar["high"]),
+                        low=float(completed_bar["low"]),
+                        close=float(completed_bar["close"]),
+                        volume=float(completed_bar["volume"]),
+                    )
 
     def _prime_strategy_bar(
         self,
@@ -723,21 +675,24 @@ class LiveRunner:
         volume: float,
     ) -> None:
         key = (symbol, timeframe)
-        history = self._append_history(
-            key=key,
+        history_buffer = self._history_by_key.get(key)
+        if history_buffer is None:
+            history_buffer = RollingBarBuffer(self._history_window)
+            self._history_by_key[key] = history_buffer
+        history_buffer.append(
             ts=ts,
             open_=open_,
             high=high,
             low=low,
             close=close,
             volume=volume,
+            label=f"{symbol}/{timeframe}",
         )
-        self._history_by_key[key] = history
         self._sma_engine.update(
             symbol=symbol,
             timeframe=timeframe,
             ts=ts.to_pydatetime(),
-            source_value=_strategy_source_value(
+            source_value=strategy_source_value(
                 open_=open_,
                 high=high,
                 low=low,
@@ -757,6 +712,33 @@ class LiveRunner:
         )
         return stream.stream_bars()
 
+    def _initialize_timeframe_aggregators(
+        self,
+        execution_pairs: list[tuple[str, str]],
+    ) -> None:
+        self._aggregators_by_key = {}
+        for symbol, timeframe in execution_pairs:
+            if timeframe == "1m":
+                continue
+            self._aggregators_by_key[(symbol, timeframe)] = IncrementalTimeframeAggregator(
+                timeframe=timeframe,
+                timezone=self.settings.sessions.timezone,
+                anchors=self.settings.timeframes.anchors,
+            )
+
+    def _cross_context_lookup(
+        self,
+        reference_route_id: str,
+        ts: datetime,
+    ) -> RouteBarContext | None:
+        cached = self._latest_context_by_route_id.get(reference_route_id)
+        if cached is None:
+            return None
+        cached_ts, context = cached
+        if cached_ts <= to_utc_timestamp(ts):
+            return context
+        return None
+
     def _split_market_symbols(self, symbols: list[str]) -> list[tuple[str, list[str]]]:
         groups_by_market: dict[str, list[str]] = {"stocks": [], "crypto": []}
         for symbol in symbols:
@@ -769,28 +751,14 @@ class LiveRunner:
             groups.append(("crypto", groups_by_market["crypto"]))
         return groups
 
-    @staticmethod
-    def _resolve_outfits_path(outfits_path: str) -> Path:
-        candidate = Path(outfits_path)
-        if not candidate.exists():
-            raise FileNotFoundError(
-                "Configured outfits catalog path does not exist: "
-                f"{candidate}"
-            )
-        if not candidate.is_file():
-            raise FileNotFoundError(
-                "Configured outfits catalog path is not a file: "
-                f"{candidate}"
-            )
-        return candidate
-
     def _reset_state(self) -> None:
-        self._source_1m_by_symbol: dict[str, pd.DataFrame] = {}
-        self._history_by_key: dict[tuple[str, str], pd.DataFrame] = {}
+        self._source_windows_by_symbol: dict[str, SourceBarWindow] = {}
+        self._history_by_key: dict[tuple[str, str], RollingBarBuffer] = {}
+        self._aggregators_by_key: dict[tuple[str, str], IncrementalTimeframeAggregator] = {}
+        self._latest_context_by_route_id: dict[str, tuple[pd.Timestamp, RouteBarContext]] = {}
         self._active_positions_by_key: dict[tuple[str, str], list[ManagedPosition]] = {}
         self._timeframes_by_symbol: dict[str, list[str]] = {}
         self._proxy_prices: dict[str, float] = {}
-        self._last_processed_ts: dict[tuple[str, str], pd.Timestamp] = {}
         self._session_windows_by_date: dict[str, tuple[pd.Timestamp, pd.Timestamp] | None] = {}
 
         self._event_ids: dict[str, set[str]] = {
@@ -864,90 +832,6 @@ class LiveRunner:
             allow_same_bar_exit=self.settings.strategy.allow_same_bar_exit,
         )
 
-    def _resolve_execution_pairs(
-        self,
-        symbols: list[str],
-        timeframes: list[str],
-    ) -> list[tuple[str, str]]:
-        normalized_symbols = [symbol.upper() for symbol in symbols]
-        if not self.settings.strategy.strict_routing:
-            return [
-                (symbol, timeframe)
-                for symbol in normalized_symbols
-                for timeframe in timeframes
-            ]
-
-        configured_routes = self.settings.strategy.routes
-        configured_symbols = {route.symbol for route in configured_routes}
-        configured_timeframes = {route.timeframe for route in configured_routes}
-        selected = [
-            (route.symbol, route.timeframe)
-            for route in configured_routes
-            if route.symbol in normalized_symbols and route.timeframe in timeframes
-        ]
-        if not selected:
-            raise RuntimeError(
-                "Strict routing preflight failed for run-live: requested symbols/timeframes "
-                "do not match any configured route."
-            )
-
-        missing_symbols = sorted(set(normalized_symbols).difference(configured_symbols))
-        missing_timeframes = sorted(set(timeframes).difference(configured_timeframes))
-        if missing_symbols or missing_timeframes:
-            details: list[str] = []
-            if missing_symbols:
-                details.append("symbols=" + ",".join(missing_symbols))
-            if missing_timeframes:
-                details.append("timeframes=" + ",".join(missing_timeframes))
-            raise RuntimeError(
-                "Strict routing preflight failed for run-live: requested values outside configured "
-                "routes (" + "; ".join(details) + ")."
-            )
-
-        unique_pairs: list[tuple[str, str]] = []
-        seen: set[tuple[str, str]] = set()
-        for pair in selected:
-            if pair not in seen:
-                seen.add(pair)
-                unique_pairs.append(pair)
-        return unique_pairs
-
-    def _enforce_live_risk_mode_support(
-        self,
-        execution_pairs: list[tuple[str, str]],
-    ) -> None:
-        selected_pairs = set(execution_pairs)
-        unsupported_routes = [
-            route.id
-            for route in self.settings.strategy.routes
-            if route.risk_mode == "atr_dynamic_stop"
-            and (route.symbol, route.timeframe) in selected_pairs
-        ]
-        if unsupported_routes:
-            raise RuntimeError(
-                "run-live supports replay-only risk_mode violation: "
-                "atr_dynamic_stop is replay-only in v1. "
-                "Offending routes: " + ", ".join(sorted(unsupported_routes))
-            )
-
-    def _enforce_live_cross_symbol_context_support(
-        self,
-        execution_pairs: list[tuple[str, str]],
-    ) -> None:
-        selected_pairs = set(execution_pairs)
-        unsupported_routes = [
-            route.id
-            for route in self.settings.strategy.routes
-            if route.cross_symbol_context.enabled
-            and (route.symbol, route.timeframe) in selected_pairs
-        ]
-        if unsupported_routes:
-            raise RuntimeError(
-                "run-live supports replay-only cross_symbol_context violation: "
-                "cross_symbol_context is replay-only in v1. "
-                "Offending routes: " + ", ".join(sorted(unsupported_routes))
-            )
-
     def _ensure_calendar_sessions_for_range(
         self,
         start: pd.Timestamp,
@@ -968,63 +852,9 @@ class LiveRunner:
             return
         self._ensure_calendar_sessions_for_range(start=ts, end=ts)
 
-
-def _empty_bar_frame() -> pd.DataFrame:
-    return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
-
-
-def _to_utc_timestamp(value: object) -> pd.Timestamp:
-    ts = pd.Timestamp(value)
-    if ts.tzinfo is None:
-        return ts.tz_localize("UTC")
-    return ts.tz_convert("UTC")
-
-
-def _bar_matches(
-    row: pd.Series,
-    open_: float,
-    high: float,
-    low: float,
-    close: float,
-    volume: float,
-) -> bool:
-    return (
-        float(row["open"]) == float(open_)
-        and float(row["high"]) == float(high)
-        and float(row["low"]) == float(low)
-        and float(row["close"]) == float(close)
-        and float(row["volume"]) == float(volume)
-    )
-
-
 def _event_identity(event: Any) -> str:
     if hasattr(event, "id"):
         return str(getattr(event, "id"))
     if hasattr(event, "signal_id"):
         return str(getattr(event, "signal_id"))
     raise ValueError(f"Unsupported event type for idempotent persistence: {type(event)}")
-
-
-def _timeframes_by_symbol(
-    pairs: list[tuple[str, str]],
-) -> dict[str, list[str]]:
-    mapping: dict[str, list[str]] = {}
-    for symbol, timeframe in pairs:
-        values = mapping.setdefault(symbol, [])
-        if timeframe not in values:
-            values.append(timeframe)
-    return mapping
-
-
-def _strategy_source_value(
-    open_: float,
-    high: float,
-    low: float,
-    close: float,
-    price_basis: str,
-) -> float:
-    if price_basis == "close":
-        return close
-    if price_basis == "ohlc4":
-        return (open_ + high + low + close) / 4.0
-    raise RuntimeError(f"Unsupported strategy.price_basis '{price_basis}'")

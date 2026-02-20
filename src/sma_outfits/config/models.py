@@ -11,9 +11,15 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationError,
     ValidationInfo,
     field_validator,
     model_validator,
+)
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
 )
 
 from sma_outfits.utils import SUPPORTED_TIMEFRAMES
@@ -497,7 +503,6 @@ def _default_strategy_routes() -> list[RouteRule]:
 class StrategyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["author_v1"] = "author_v1"
     price_basis: Literal["ohlc4", "close"] = "ohlc4"
     trigger_mode: Literal["close_touch_or_cross"] = "close_touch_or_cross"
     strict_routing: bool = True
@@ -713,25 +718,65 @@ class Settings(BaseModel):
         return self
 
 
+class _EnvLocalSecrets(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
+    ALPACA_API_KEY: str
+    ALPACA_SECRET_KEY: str
+    ALPACA_BASE_URL: str
+    ALPACA_DATA_URL: str
+    ALPACA_DATA_FEED: str
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Secrets are read only from .env.local by repository contract.
+        return (dotenv_settings,)
+
+    @field_validator(
+        "ALPACA_API_KEY",
+        "ALPACA_SECRET_KEY",
+        "ALPACA_BASE_URL",
+        "ALPACA_DATA_URL",
+        "ALPACA_DATA_FEED",
+    )
+    @classmethod
+    def _non_empty(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("value must be non-empty")
+        return candidate
+
+
 def read_env_local(path: Path = Path(".env.local")) -> dict[str, str]:
     if not path.exists():
         raise FileNotFoundError(f"Required environment file not found: {path}")
-    env: dict[str, str] = {}
-    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            raise ValueError(f"Invalid .env.local line {line_number}: '{raw_line}'")
-        key, value = line.split("=", 1)
-        env[key.strip()] = value.strip().strip('"').strip("'")
+    try:
+        parsed = _EnvLocalSecrets(_env_file=path, _env_file_encoding="utf-8")
+    except ValidationError as exc:
+        missing: list[str] = []
+        for error in exc.errors():
+            if error.get("type") == "missing":
+                location = error.get("loc", ())
+                if location:
+                    missing.append(str(location[0]))
+        if missing:
+            raise ValueError(
+                "Missing required keys in .env.local: " + ", ".join(sorted(missing))
+            ) from exc
+        raise ValueError(f"Invalid .env.local values: {exc}") from exc
 
-    missing = [key for key in REQUIRED_ENV_KEYS if not env.get(key)]
-    if missing:
-        raise ValueError(
-            "Missing required keys in .env.local: " + ", ".join(missing)
-        )
-    return env
+    return {key: getattr(parsed, key) for key in REQUIRED_ENV_KEYS}
 
 
 def load_settings(

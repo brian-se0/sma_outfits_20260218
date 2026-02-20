@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
+import time
 from pathlib import Path
 from typing import Any
 
 import duckdb
+import orjson
 import pandas as pd
 
 from sma_outfits.data.resample import ensure_ohlcv_schema
@@ -15,6 +16,7 @@ class StorageManager:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "bars").mkdir(parents=True, exist_ok=True)
+        self._write_sequence = 0
 
     @staticmethod
     def _safe_symbol(symbol: str) -> str:
@@ -44,17 +46,10 @@ class StorageManager:
         for session_date, chunk in bars.groupby("session_date"):
             directory = self._bars_base(symbol, timeframe) / f"date={session_date}"
             directory.mkdir(parents=True, exist_ok=True)
-            path = directory / "bars.parquet"
+            self._write_sequence += 1
+            chunk_id = f"{time.time_ns()}_{self._write_sequence:06d}"
+            path = directory / f"bars-{chunk_id}.parquet"
             next_chunk = chunk.drop(columns=["session_date"])
-            if path.exists():
-                existing = pd.read_parquet(path)
-                next_chunk = pd.concat([existing, next_chunk], ignore_index=True)
-                next_chunk["ts"] = pd.to_datetime(next_chunk["ts"], utc=True)
-                next_chunk = (
-                    next_chunk.sort_values("ts")
-                    .drop_duplicates(subset=["ts"])
-                    .reset_index(drop=True)
-                )
             try:
                 next_chunk.to_parquet(path, index=False)
             except OSError as exc:
@@ -78,30 +73,53 @@ class StorageManager:
         end: pd.Timestamp | None = None,
     ) -> pd.DataFrame:
         base = self._bars_base(symbol, timeframe)
+        empty = pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
         if not base.exists():
-            return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
-        frames: list[pd.DataFrame] = []
-        for path in sorted(base.glob("date=*/bars.parquet")):
-            frames.append(pd.read_parquet(path))
-        if not frames:
-            return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
-        out = pd.concat(frames, ignore_index=True)
-        out["ts"] = pd.to_datetime(out["ts"], utc=True)
+            return empty
+
+        parquet_files = sorted(base.glob("date=*/bars*.parquet"))
+        if not parquet_files:
+            return empty
+
+        parquet_glob = str(base / "date=*" / "bars*.parquet")
+        query = [
+            "SELECT ts, open, high, low, close, volume",
+            "FROM (",
+            "  SELECT ts, open, high, low, close, volume,",
+            "         row_number() OVER (PARTITION BY ts ORDER BY filename DESC) AS rn",
+            "  FROM read_parquet(?, filename=true)",
+            ")",
+            "WHERE rn = 1",
+        ]
+        params: list[Any] = [parquet_glob]
         if start is not None:
-            out = out.loc[out["ts"] >= pd.Timestamp(start).tz_convert("UTC")]
+            query.append("  AND ts >= ?")
+            params.append(_as_utc_timestamp(start).to_pydatetime())
         if end is not None:
-            out = out.loc[out["ts"] <= pd.Timestamp(end).tz_convert("UTC")]
-        out = out.sort_values("ts").drop_duplicates(subset=["ts"]).reset_index(drop=True)
-        return out
+            query.append("  AND ts <= ?")
+            params.append(_as_utc_timestamp(end).to_pydatetime())
+        query.append("ORDER BY ts")
+
+        connection = duckdb.connect()
+        try:
+            out = connection.execute("\n".join(query), params).df()
+        finally:
+            connection.close()
+        if out.empty:
+            return empty
+
+        out["ts"] = pd.to_datetime(out["ts"], utc=True)
+        out = out.sort_values("ts").reset_index(drop=True)
+        return out.loc[:, ["ts", "open", "high", "low", "close", "volume"]]
 
     def append_events(self, name: str, records: list[dict[str, Any]]) -> Path:
         events_root = self.root / "events"
         events_root.mkdir(parents=True, exist_ok=True)
         path = events_root / f"{name}.jsonl"
-        with path.open("a", encoding="utf-8") as handle:
+        with path.open("ab") as handle:
             for record in records:
-                handle.write(json.dumps(record, sort_keys=True))
-                handle.write("\n")
+                handle.write(orjson.dumps(record, option=orjson.OPT_SORT_KEYS))
+                handle.write(b"\n")
         return path
 
     def load_events(self, name: str) -> list[dict[str, Any]]:
@@ -109,19 +127,16 @@ class StorageManager:
         if not path.exists():
             return []
         rows: list[dict[str, Any]] = []
-        with path.open("r", encoding="utf-8") as handle:
+        with path.open("rb") as handle:
             for raw in handle:
                 line = raw.strip()
                 if line:
-                    rows.append(json.loads(line))
+                    rows.append(orjson.loads(line))
         return rows
 
-    def open_duckdb(self) -> duckdb.DuckDBPyConnection:
-        db_path = self.root / "sma_outfits.duckdb"
-        connection = duckdb.connect(str(db_path))
-        parquet_glob = str(self.root / "bars" / "timeframe=*" / "symbol=*" / "date=*" / "bars.parquet")
-        connection.execute(
-            "CREATE OR REPLACE VIEW bars AS SELECT * FROM read_parquet(?)",
-            [parquet_glob],
-        )
-        return connection
+
+def _as_utc_timestamp(value: pd.Timestamp) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        return ts.tz_localize("UTC")
+    return ts.tz_convert("UTC")

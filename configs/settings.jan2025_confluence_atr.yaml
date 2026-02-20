@@ -114,7 +114,6 @@ signal:
   volatility_percentile_threshold: 75.0
 
 strategy:
-  mode: author_v1
   price_basis: ohlc4
   trigger_mode: close_touch_or_cross
   strict_routing: true

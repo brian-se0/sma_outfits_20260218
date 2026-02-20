@@ -3,9 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from enum import Enum
 from pathlib import Path
-from typing import Annotated
 
 import pandas as pd
 import typer
@@ -24,6 +22,8 @@ from sma_outfits.data.alpaca_clients import AlpacaRESTClient
 from sma_outfits.data.ingest import BackfillResult, backfill_historical, source_timeframe_for
 from sma_outfits.data.resample import resample_ohlcv
 from sma_outfits.data.storage import StorageManager
+from sma_outfits.events import event_to_record
+from sma_outfits.execution import resolve_execution_pairs
 from sma_outfits.live import LiveRunner
 from sma_outfits.monitoring.logging import configure_logging
 from sma_outfits.monitoring.progress import TerminalProgressBar, TerminalStatusLine
@@ -33,12 +33,6 @@ from sma_outfits.runtime import assert_python_runtime
 from sma_outfits.utils import dedupe_keep_order, ensure_utc_timestamp, market_for_symbol, parse_csv
 
 app = typer.Typer(add_completion=False, help="SMA outfits Alpaca-only recreation CLI")
-
-
-class ReportAttributionMode(str, Enum):
-    strike = "strike"
-    close = "close"
-    both = "both"
 
 
 def _load_runtime_settings(config: Path) -> Settings:
@@ -156,39 +150,12 @@ def _preflight_strict_route_scope(
     timeframes: list[str],
     settings: Settings,
 ) -> None:
-    if not settings.strategy.strict_routing:
-        return
-    normalized_symbols = [symbol.upper() for symbol in symbols]
-    configured_routes = settings.strategy.routes
-    configured_symbols = {route.symbol for route in configured_routes}
-    configured_timeframes = {route.timeframe for route in configured_routes}
-    selected_pairs = [
-        (route.symbol, route.timeframe)
-        for route in configured_routes
-        if route.symbol in normalized_symbols and route.timeframe in timeframes
-    ]
-    if not selected_pairs:
-        raise RuntimeError(
-            f"Strict routing preflight failed for {command}: requested symbols/timeframes "
-            "do not match any configured route."
-        )
-
-    missing_symbols = sorted(set(normalized_symbols).difference(configured_symbols))
-    missing_timeframes = sorted(set(timeframes).difference(configured_timeframes))
-    if missing_symbols or missing_timeframes:
-        details: list[str] = []
-        if missing_symbols:
-            details.append("symbols=" + ",".join(missing_symbols))
-        if missing_timeframes:
-            details.append("timeframes=" + ",".join(missing_timeframes))
-        configured = ", ".join(
-            f"{route.symbol}/{route.timeframe}" for route in configured_routes
-        )
-        raise RuntimeError(
-            f"Strict routing preflight failed for {command}: requested values outside configured "
-            "strict routes (" + "; ".join(details) + "). "
-            f"Configured routes: {configured}"
-        )
+    resolve_execution_pairs(
+        settings=settings,
+        symbols=symbols,
+        timeframes=timeframes,
+        command=command,
+    )
 
 
 @app.command("validate-config")
@@ -531,12 +498,20 @@ def replay(
         timeframes=selected_timeframes,
         progress_callback=_on_progress if progress else None,
     )
+    summary = build_summary_from_records(
+        strike_rows=[event_to_record(event) for event in result.strikes],
+        signal_rows=[event_to_record(event) for event in result.signals],
+        position_rows=[event_to_record(event) for event in result.position_events],
+        start=start_ts,
+        end=end_ts,
+        attribution_mode="both",
+    )
     if progress_bar is not None:
         progress_bar.close()
     label = f"{start_ts.strftime('%Y%m%dT%H%M%S')}_{end_ts.strftime('%Y%m%dT%H%M%S')}"
     report_root = Path(settings.archive.root) / "reports"
-    markdown_path, csv_path = write_summary_report(result.summary, report_root, label)
-    typer.echo(json.dumps(result.summary, indent=2))
+    markdown_path, csv_path = write_summary_report(summary, report_root, label)
+    typer.echo(json.dumps(summary, indent=2))
     typer.echo(f"report_markdown={markdown_path}")
     typer.echo(f"report_csv={csv_path}")
 
@@ -649,9 +624,9 @@ def verify_readiness(
         "timeframes": selected_timeframes,
         "pairs_checked": checked_pairs,
         "summary_snapshot": {
-            "total_strikes": summary["total_strikes"],
-            "total_signals": summary["total_signals"],
-            "closed_positions": summary["closed_positions"],
+            "total_strikes": summary["strike_attribution"]["total_strikes"],
+            "total_signals": summary["strike_attribution"]["total_signals"],
+            "closed_positions": summary["strike_attribution"]["closed_positions"],
             "attribution_mode": summary["attribution_mode"],
         },
         "artifact_hashes": hashes,
@@ -672,13 +647,6 @@ def report(
         "--range",
         help="UTC range format start:end (date-only) or start,end (full timestamps)",
     ),
-    attribution: Annotated[
-        ReportAttributionMode,
-        typer.Option(
-            "--attribution",
-            help="Report attribution mode: strike, close, or both",
-        ),
-    ] = ReportAttributionMode.both,
 ) -> None:
     assert_python_runtime()
     settings = _load_runtime_settings(config)
@@ -694,7 +662,7 @@ def report(
         position_rows=positions,
         start=start_ts,
         end=end_ts,
-        attribution_mode=attribution.value,
+        attribution_mode="both",
     )
     label = (
         f"{start_ts.strftime('%Y%m%d')}_{end_ts.strftime('%Y%m%d')}"
