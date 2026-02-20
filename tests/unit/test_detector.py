@@ -180,6 +180,34 @@ def test_micro_confirmation_blocks_signal_when_not_positive() -> None:
     assert not signals
 
 
+def test_micro_confirmation_allows_within_tolerance() -> None:
+    route = RouteRule(
+        id="spy_1m_micro_tol",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[5, 8],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+    )
+    outfits = [OutfitDefinition("route_outfit", (5, 8, 10), "route", "5/8/10")]
+    detector = StrikeDetector(outfits=outfits, routes=[route], strict_routing=True, tolerance=0.01)
+    bar = _bar(close=100.0, minute=6)
+    states = {
+        10: _state(bar, 10, 100.0),
+        5: _state(bar, 5, 99.99),
+        8: _state(bar, 8, 100.008),
+    }
+    strikes, signals = detector.detect(bar=bar, sma_states=states, history=_history(99.0, 100.0))
+    assert len(strikes) == 1
+    assert len(signals) == 1
+
+
 def test_strict_routing_missing_route_fails() -> None:
     detector = StrikeDetector(
         outfits=[OutfitDefinition("route_outfit", (10,), "route", "10")],
@@ -307,6 +335,45 @@ def test_confluence_enabled_emits_signal_only_when_all_conditions_pass() -> None
     states = {
         5: _state(bar, 5, 99.5),
         8: _state(bar, 8, 99.8),
+        10: _state(bar, 10, 100.0),
+    }
+
+    strikes, signals = detector.detect(
+        bar=bar,
+        sma_states=states,
+        history=_history(99.7, 99.8, 99.9, 100.0, volumes=[1000.0, 1000.0, 1000.0, 2000.0]),
+    )
+    assert len(strikes) == 1
+    assert len(signals) == 1
+
+
+def test_confluence_alignment_allows_within_tolerance() -> None:
+    route = RouteRule(
+        id="spy_1m_confluence_tol",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[5],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+        confluence={
+            "enabled": True,
+            "min_outfit_alignment_count": 3,
+            "volume_lookback_bars": 3,
+            "volume_spike_ratio": 1.5,
+        },
+    )
+    outfits = [OutfitDefinition("route_outfit", (5, 8, 10), "route", "5/8/10")]
+    detector = StrikeDetector(outfits=outfits, routes=[route], strict_routing=True, tolerance=0.01)
+    bar = _bar(close=100.0, volume=2000.0, minute=11)
+    states = {
+        5: _state(bar, 5, 99.99),
+        8: _state(bar, 8, 100.008),
         10: _state(bar, 10, 100.0),
     }
 

@@ -41,6 +41,7 @@ universe:
     - AMD
     - GME
     - RWM
+    - IWM
     - SMH
     - FAS
     - FAZ
@@ -89,6 +90,7 @@ universe:
     AMD: stocks
     GME: stocks
     RWM: stocks
+    IWM: stocks
     SMH: stocks
     FAS: stocks
     FAZ: stocks
@@ -143,6 +145,186 @@ strategy:
         multiplier: 1.5
     - id: rwm_30m_author
       symbol: RWM
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: atr_dynamic_stop
+      stop_offset: 0.01
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+    - id: svix_30m_author
+      symbol: SVIX
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: atr_dynamic_stop
+      stop_offset: 0.01
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+    - id: sqqq_30m_author
+      symbol: SQQQ
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: atr_dynamic_stop
+      stop_offset: 0.01
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+    - id: tqqq_30m_author
+      symbol: TQQQ
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: atr_dynamic_stop
+      stop_offset: 0.01
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+    - id: iwm_30m_author
+      symbol: IWM
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: atr_dynamic_stop
+      stop_offset: 0.01
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+    - id: xlf_30m_author
+      symbol: XLF
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: atr_dynamic_stop
+      stop_offset: 0.01
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+    - id: soxl_30m_author
+      symbol: SOXL
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: atr_dynamic_stop
+      stop_offset: 0.01
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+    - id: spy_30m_author
+      symbol: SPY
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: atr_dynamic_stop
+      stop_offset: 0.01
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+    - id: upro_30m_author
+      symbol: UPRO
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: atr_dynamic_stop
+      stop_offset: 0.01
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+    - id: vixy_30m_author
+      symbol: VIXY
       timeframe: 30m
       outfit_id: svix_211_106
       key_period: 844

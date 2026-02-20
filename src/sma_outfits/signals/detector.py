@@ -194,9 +194,13 @@ class StrikeDetector:
             micro_values.append(state.value)
 
         if route.side == "LONG":
-            micro_positive = all(bar.close >= value for value in micro_values)
+            micro_positive = all(
+                bar.close >= (value - self.tolerance) for value in micro_values
+            )
         else:
-            micro_positive = all(bar.close <= value for value in micro_values)
+            micro_positive = all(
+                bar.close <= (value + self.tolerance) for value in micro_values
+            )
 
         macro_positive = self._macro_positive(route, sma_states)
         if macro_positive is None:
@@ -328,10 +332,10 @@ class StrikeDetector:
             if state is None:
                 return False
             if route.side == "LONG":
-                if bar.close >= state.value:
+                if bar.close >= (state.value - self.tolerance):
                     alignment_count += 1
             else:
-                if bar.close <= state.value:
+                if bar.close <= (state.value + self.tolerance):
                     alignment_count += 1
 
         if alignment_count < confluence.min_outfit_alignment_count:

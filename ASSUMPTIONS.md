@@ -20,7 +20,9 @@
 5. Timeout termination is deterministic: close after `120` bars without a new directional extreme.
 6. Risk migration uses explicit `risk.migrations` rules in config.
 7. Confluence filters are route-local in v1 (touch/cross + outfit alignment + volume spike) and disabled by default unless explicitly enabled per route.
-8. `atr_dynamic_stop` is replay-only in v1 and blocked for live execution.
+8. Route tolerance applies uniformly across key, micro, and confluence SMA comparisons (LONG uses `close >= sma - tolerance`, SHORT uses `close <= sma + tolerance`).
+9. `atr_dynamic_stop` is replay-only in v1 and blocked for live execution.
+10. Canonical SVIX outfit for production/research runs is `26/52/106/211/422/844` (`svix_211_106`) per README; `svix_211_116` is retained only as an explicit comparator/profile variant for RWM-specific archival analysis.
 
 ## Source Catalog Ambiguity
 1. README rows that are malformed or semantically incomplete are preserved in `src/sma_outfits/config/outfits.yaml` with `source_ambiguous: true`.

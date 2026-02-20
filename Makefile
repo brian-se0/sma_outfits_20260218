@@ -10,6 +10,7 @@ CONFIG ?= configs/settings.example.yaml
 #   make e2e
 #   make e2e PROFILE=week SYMBOLS=SPY
 #   make e2e PROFILE=max UNIVERSE=all TIMEFRAME_SET=all
+#   make e2e PROFILE=month UNIVERSE=core_expanded TIMEFRAME_SET=core
 #   make e2e PROFILE=custom START=2025-01-02T14:30:00Z END=2025-01-31T21:00:00Z
 #   make e2e PROFILE=month WARMUP_DAYS=150
 #   make e2e PROFILE=month STAGES=backfill,replay,report
@@ -17,6 +18,8 @@ PROFILE ?= smoke
 UNIVERSE ?= core
 TIMEFRAME_SET ?= core
 STAGES ?= validate-config,backfill,replay,report
+FEATURES ?=
+CORE_EXPANDED_SYMBOLS := QQQ,RWM,SVIX,SQQQ,TQQQ,IWM,XLF,SOXL,SPY,UPRO,VIXY
 
 comma := ,
 empty :=
@@ -30,6 +33,21 @@ ifneq ($(strip $(INVALID_STAGES)),)
 $(error Unsupported STAGES value(s): $(INVALID_STAGES). Allowed: $(VALID_STAGES))
 endif
 has_stage = $(findstring $(comma)$(1)$(comma),$(STAGES_CSV))
+
+# Features are explicitly validated so unknown flags cannot be passed silently.
+FEATURES_NORMALIZED := $(subst $(space),,$(FEATURES))
+FEATURES_CSV := $(comma)$(FEATURES_NORMALIZED)$(comma)
+FEATURE_VALUES := $(subst $(comma),$(space),$(FEATURES_NORMALIZED))
+VALID_FEATURES := cross_symbol_context
+INVALID_FEATURES := $(filter-out $(VALID_FEATURES),$(FEATURE_VALUES))
+ifneq ($(strip $(INVALID_FEATURES)),)
+$(error Unsupported FEATURES value(s): $(INVALID_FEATURES). Allowed: $(VALID_FEATURES))
+endif
+ifneq ($(strip $(FEATURES_NORMALIZED)),)
+ifneq ($(findstring $(comma)cross_symbol_context$(comma),$(FEATURES_CSV)),)
+$(error FEATURES includes cross_symbol_context, but this feature is not implemented yet in CLI/replay. Remove FEATURES or implement feature-gating first)
+endif
+endif
 
 # Storage safety guard for larger e2e profiles.
 MIN_FREE_GB ?= 50
@@ -67,10 +85,12 @@ endif
 
 ifeq ($(UNIVERSE),core)
 PROFILE_SYMBOLS := QQQ,RWM
+else ifeq ($(UNIVERSE),core_expanded)
+PROFILE_SYMBOLS := $(CORE_EXPANDED_SYMBOLS)
 else ifeq ($(UNIVERSE),all)
 PROFILE_SYMBOLS :=
 else
-$(error Unsupported UNIVERSE='$(UNIVERSE)'. Use: core, all)
+$(error Unsupported UNIVERSE='$(UNIVERSE)'. Use: core, core_expanded, all)
 endif
 
 ifeq ($(TIMEFRAME_SET),core)
@@ -114,7 +134,7 @@ E2E_REPORT_ATTRIBUTION_ARG := $(if $(strip $(REPORT_ATTRIBUTION)),--attribution 
 .PHONY: help venv install check-python validate-config test backfill replay run-live report preflight-storage e2e clean clean-all
 
 help:
-	powershell -NoProfile -Command "Write-Output 'Targets:'; Write-Output '  make validate-config'; Write-Output '  make test'; Write-Output '  make backfill'; Write-Output '  make replay'; Write-Output '  make run-live'; Write-Output '  make report'; Write-Output '  make e2e'; Write-Output '  make clean'; Write-Output '  make clean-all'; Write-Output ''; Write-Output 'Common variables:'; Write-Output '  CONFIG=...'; Write-Output '  PROFILE=smoke|day|week|month|max|custom'; Write-Output '  START=... END=... (required when PROFILE=custom)'; Write-Output '  SYMBOLS=CSV'; Write-Output '  TIMEFRAMES=CSV'; Write-Output '  STAGES=validate-config,backfill,replay,report'; Write-Output '  ANALYSIS_START=... ANALYSIS_END=... WARMUP_DAYS=...'; Write-Output '  REPORT_RANGE=start,end REPORT_ATTRIBUTION=strike|close|both'; Write-Output ''; Write-Output 'Examples:'; Write-Output '  make e2e PROFILE=month SYMBOLS=QQQ,RWM TIMEFRAME_SET=core'; Write-Output '  make e2e PROFILE=custom START=2024-09-04T14:30:00Z END=2025-01-31T21:00:00Z STAGES=backfill,replay,report'; Write-Output '  make report REPORT_RANGE=2024-09-04T14:30:00Z,2025-01-31T21:00:00Z REPORT_ATTRIBUTION=both'"
+	powershell -NoProfile -Command "Write-Output 'Targets:'; Write-Output '  make validate-config'; Write-Output '  make test'; Write-Output '  make backfill'; Write-Output '  make replay'; Write-Output '  make run-live'; Write-Output '  make report'; Write-Output '  make e2e'; Write-Output '  make clean'; Write-Output '  make clean-all'; Write-Output ''; Write-Output 'Common variables:'; Write-Output '  CONFIG=...'; Write-Output '  PROFILE=smoke|day|week|month|max|custom'; Write-Output '  UNIVERSE=core|core_expanded|all'; Write-Output '  START=... END=... (required when PROFILE=custom)'; Write-Output '  SYMBOLS=CSV'; Write-Output '  TIMEFRAMES=CSV'; Write-Output '  STAGES=validate-config,backfill,replay,report'; Write-Output '  FEATURES=cross_symbol_context (reserved; currently rejected until implemented)'; Write-Output '  ANALYSIS_START=... ANALYSIS_END=... WARMUP_DAYS=...'; Write-Output '  REPORT_RANGE=start,end REPORT_ATTRIBUTION=strike|close|both'; Write-Output ''; Write-Output 'Examples:'; Write-Output '  make e2e PROFILE=month SYMBOLS=QQQ,RWM TIMEFRAME_SET=core'; Write-Output '  make e2e PROFILE=month UNIVERSE=core_expanded TIMEFRAME_SET=core'; Write-Output '  make e2e PROFILE=custom START=2024-09-04T14:30:00Z END=2025-01-31T21:00:00Z STAGES=backfill,replay,report'; Write-Output '  make report REPORT_RANGE=2024-09-04T14:30:00Z,2025-01-31T21:00:00Z REPORT_ATTRIBUTION=both'"
 
 venv:
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; if (!(Test-Path '$(PYTHON)')) { py -3.14 -m venv $(VENV) }; if (!(Test-Path '$(VENV)\\Scripts\\pip.exe')) { & '$(PYTHON)' -m ensurepip --upgrade --default-pip }"

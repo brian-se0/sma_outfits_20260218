@@ -56,3 +56,6 @@ artifacts/
 *.code-workspace
 .DS_Store
 Thumbs.db
+
+# Repo-local agent instructions
+AGENTS.md
