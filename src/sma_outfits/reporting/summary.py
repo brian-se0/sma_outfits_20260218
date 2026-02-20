@@ -4,15 +4,12 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from statistics import median
-from typing import Any, Literal
+from typing import Any
 
 import pandas as pd
 
 from sma_outfits.events import PositionEvent, SignalEvent, StrikeEvent
 from sma_outfits.utils import ensure_utc_timestamp
-
-AttributionMode = Literal["both"]
-
 
 def build_summary(
     strikes: list[StrikeEvent],
@@ -74,15 +71,7 @@ def build_summary_from_records(
     position_rows: list[dict[str, Any]],
     start: pd.Timestamp | None = None,
     end: pd.Timestamp | None = None,
-    attribution_mode: AttributionMode = "both",
 ) -> dict[str, Any]:
-    if attribution_mode != "both":
-        raise ValueError(
-            "Unsupported attribution_mode '{}'. Expected: both".format(
-                attribution_mode
-            )
-        )
-
     strikes = [_record_to_strike(row) for row in strike_rows]
     signals = [_record_to_signal(row) for row in signal_rows]
     positions = [_record_to_position(row) for row in position_rows]

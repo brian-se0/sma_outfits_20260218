@@ -504,7 +504,6 @@ def replay(
         position_rows=[event_to_record(event) for event in result.position_events],
         start=start_ts,
         end=end_ts,
-        attribution_mode="both",
     )
     if progress_bar is not None:
         progress_bar.close()
@@ -586,7 +585,6 @@ def verify_readiness(
         position_rows=positions,
         start=start_ts,
         end=end_ts,
-        attribution_mode="both",
     )
 
     report_root = Path(settings.archive.root) / "reports"
@@ -662,7 +660,6 @@ def report(
         position_rows=positions,
         start=start_ts,
         end=end_ts,
-        attribution_mode="both",
     )
     label = (
         f"{start_ts.strftime('%Y%m%d')}_{end_ts.strftime('%Y%m%d')}"
