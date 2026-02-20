@@ -144,7 +144,7 @@ strategy:
     - id: rwm_30m_author
       symbol: RWM
       timeframe: 30m
-      outfit_id: svix_211
+      outfit_id: svix_211_116
       key_period: 844
       side: LONG
       signal_type: magnetized_buy
@@ -177,7 +177,7 @@ risk:
 
 archive:
   enabled: true
-  root: artifacts
+  root: artifacts/svix211_116
 
 ingest:
   empty_source_policy: fail
@@ -192,6 +192,6 @@ live:
   heartbeat_interval_seconds: 20
   heartbeat_timeout_seconds: 10
 
-storage_root: artifacts/storage
-events_root: artifacts/events
+storage_root: artifacts/svix211_116/storage
+events_root: artifacts/svix211_116/events
 outfits_path: src/sma_outfits/config/outfits.yaml

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from sma_outfits.config.models import RouteRule
 from sma_outfits.data.storage import StorageManager
@@ -88,6 +89,53 @@ def _frame(
             "low": lows,
             "close": closes,
             "volume": [1000.0 for _ in closes],
+        }
+    )
+
+
+@pytest.fixture
+def rwm_jan31_regression_bars() -> pd.DataFrame:
+    strike_index = 843
+    total_bars = strike_index + 3
+    timestamps = pd.date_range(
+        start="2025-01-14T06:30:00Z",
+        periods=total_bars,
+        freq="30min",
+        tz="UTC",
+    )
+    closes = [18.00 for _ in range(total_bars)]
+    opens = [18.00 for _ in range(total_bars)]
+    highs = [18.05 for _ in range(total_bars)]
+    lows = [17.95 for _ in range(total_bars)]
+    volumes = [1000.0 for _ in range(total_bars)]
+
+    # Jan 31 strike bar crosses above key SMA with required volume spike.
+    closes[strike_index] = 18.04
+    opens[strike_index] = 18.04
+    highs[strike_index] = 18.09
+    lows[strike_index] = 17.99
+    volumes[strike_index] = 2000.0
+
+    # Post-entry rise that trails the ATR stop above entry.
+    closes[strike_index + 1] = 18.40
+    opens[strike_index + 1] = 18.40
+    highs[strike_index + 1] = 18.45
+    lows[strike_index + 1] = 18.30
+
+    # Pullback that hits trailed ATR stop while still profitable.
+    closes[strike_index + 2] = 18.20
+    opens[strike_index + 2] = 18.20
+    highs[strike_index + 2] = 18.22
+    lows[strike_index + 2] = 18.18
+
+    return pd.DataFrame(
+        {
+            "ts": timestamps,
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": volumes,
         }
     )
 
@@ -282,3 +330,88 @@ def test_replay_atr_dynamic_stop_fails_when_entry_atr_unavailable(
         assert "ATR unavailable at entry" in str(exc)
     else:
         raise AssertionError("Expected replay ATR route to fail when entry ATR is unavailable")
+
+
+def test_replay_regression_rwm_jan31_event_path_is_profitable(
+    settings,
+    tmp_path: Path,
+    rwm_jan31_regression_bars: pd.DataFrame,
+) -> None:
+    outfits_path = tmp_path / "jan31_outfits.yaml"
+    outfits_path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: svix_211_116",
+                "    periods: [26, 52, 116, 211, 422, 844]",
+                "    description: svix route 116 variant",
+                "    source_configuration: 26/52/116/211/422/844 (211)",
+                "    source_ambiguous: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    replay_settings = settings.model_copy(deep=True)
+    replay_settings.outfits_path = str(outfits_path)
+    replay_settings.universe.symbols = ["RWM"]
+    replay_settings.timeframes.live = ["30m"]
+    replay_settings.archive.enabled = False
+    replay_settings.strategy.price_basis = "ohlc4"
+    replay_settings.strategy.strict_routing = True
+    replay_settings.strategy.allow_same_bar_exit = False
+    replay_settings.strategy.routes = [
+        RouteRule(
+            id="rwm_30m_jan31_regression",
+            symbol="RWM",
+            timeframe="30m",
+            outfit_id="svix_211_116",
+            key_period=844,
+            side="LONG",
+            signal_type="magnetized_buy",
+            micro_periods=[26, 52, 116, 211, 422],
+            ignore_close_below_key_when_micro_positive=False,
+            macro_gate="none",
+            risk_mode="atr_dynamic_stop",
+            stop_offset=0.01,
+            confluence={
+                "enabled": True,
+                "min_outfit_alignment_count": 3,
+                "volume_lookback_bars": 20,
+                "volume_spike_ratio": 1.5,
+            },
+            atr={"period": 14, "multiplier": 1.5},
+        )
+    ]
+    storage = StorageManager(Path(replay_settings.storage_root))
+    storage.write_bars(rwm_jan31_regression_bars, symbol="RWM", timeframe="30m")
+
+    engine = ReplayEngine(settings=replay_settings, storage=storage)
+    result = engine.run(
+        start=pd.Timestamp("2025-01-14T06:30:00Z"),
+        end=pd.Timestamp("2025-01-31T21:00:00Z"),
+        symbols=["RWM"],
+        timeframes=["30m"],
+    )
+
+    assert len(result.strikes) == 1
+    strike = result.strikes[0]
+    assert strike.outfit_id == "svix_211_116"
+    assert strike.bar_ts == pd.Timestamp("2025-01-31T20:00:00Z").to_pydatetime()
+
+    assert len(result.signals) == 1
+    signal = result.signals[0]
+    assert signal.route_id == "rwm_30m_jan31_regression"
+    assert signal.signal_type == "magnetized_buy"
+    assert signal.entry == 18.0
+    assert signal.stop < (signal.entry - 0.01)
+
+    assert len(result.position_events) == 1
+    close_event = result.position_events[0]
+    assert close_event.reason == "atr_dynamic_stop"
+    assert close_event.ts == pd.Timestamp("2025-01-31T21:00:00Z").to_pydatetime()
+    assert close_event.price > signal.entry
+
+    assert result.summary["closed_positions"] == 1
+    assert result.summary["win_rate"] == 1.0
+    assert result.summary["r_outcome"]["total_realized_r"] > 0.0

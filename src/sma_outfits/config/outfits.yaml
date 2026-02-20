@@ -109,6 +109,16 @@ outfits:
     periods: [26, 52, 116, 211, 422, 844]
     description: "SVIX"
     source_ambiguous: false
+  - id: svix_211_106
+    source_configuration: "26/52/106/211/422/844 (211)"
+    periods: [26, 52, 106, 211, 422, 844]
+    description: "SVIX (211 key, 106 variant)"
+    source_ambiguous: false
+  - id: svix_211_116
+    source_configuration: "26/52/116/211/422/844 (211)"
+    periods: [26, 52, 116, 211, 422, 844]
+    description: "SVIX (211 key, 116 variant)"
+    source_ambiguous: false
   - id: turkiye_president_12
     source_configuration: "24/48/96/192/384/768 (12)"
     periods: [24, 48, 96, 192, 384, 768]
