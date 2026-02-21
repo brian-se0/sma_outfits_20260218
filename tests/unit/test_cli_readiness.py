@@ -164,6 +164,7 @@ def test_verify_readiness_writes_acceptance_manifest(
         timeframes="1m",
         output=output_path,
         require_report_artifacts=False,
+        require_run_manifest=False,
     )
 
     assert output_path.exists()
@@ -207,4 +208,162 @@ def test_verify_readiness_fails_when_backfill_coverage_missing(
             timeframes="1m",
             output=Path("ignored.json"),
             require_report_artifacts=False,
+            require_run_manifest=False,
         )
+
+
+def test_verify_readiness_fails_when_boundary_coverage_violation_detected(
+    settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
+    monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: settings)
+
+    storage = StorageManager(Path(settings.storage_root))
+    late_bars = pd.DataFrame(
+        {
+            "ts": [
+                pd.Timestamp("2025-02-10T14:30:00Z"),
+                pd.Timestamp("2025-02-10T14:31:00Z"),
+            ],
+            "open": [100.0, 100.1],
+            "high": [100.2, 100.3],
+            "low": [99.9, 100.0],
+            "close": [100.1, 100.2],
+            "volume": [1000.0, 1100.0],
+        }
+    )
+    storage.write_bars(late_bars, symbol="SPY", timeframe="1m")
+    storage.write_bars(late_bars, symbol="QQQ", timeframe="1m")
+
+    with pytest.raises(RuntimeError, match="boundary coverage violations"):
+        cli.verify_readiness(
+            config=Path("configs/settings.example.yaml"),
+            start="2025-01-02T14:30:00Z",
+            end="2025-02-10T21:00:00Z",
+            symbols="",
+            timeframes="1m",
+            output=Path("ignored.json"),
+            require_report_artifacts=False,
+            require_run_manifest=False,
+        )
+
+
+def test_verify_readiness_fails_when_gap_quality_violation_detected(
+    settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
+    monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: settings)
+
+    storage = StorageManager(Path(settings.storage_root))
+    gappy_bars = pd.DataFrame(
+        {
+            "ts": [
+                pd.Timestamp("2025-01-02T14:30:00Z"),
+                pd.Timestamp("2025-01-02T15:30:00Z"),
+            ],
+            "open": [100.0, 100.1],
+            "high": [100.2, 100.3],
+            "low": [99.9, 100.0],
+            "close": [100.1, 100.2],
+            "volume": [1000.0, 1100.0],
+        }
+    )
+    storage.write_bars(gappy_bars, symbol="SPY", timeframe="1m")
+    storage.write_bars(gappy_bars, symbol="QQQ", timeframe="1m")
+
+    with pytest.raises(RuntimeError, match="unexpected gap quality violations"):
+        cli.verify_readiness(
+            config=Path("configs/settings.example.yaml"),
+            start="2025-01-02T14:30:00Z",
+            end="2025-01-02T21:00:00Z",
+            symbols="",
+            timeframes="1m",
+            output=Path("ignored.json"),
+            require_report_artifacts=False,
+            require_run_manifest=False,
+        )
+
+
+def test_verify_readiness_fails_when_run_manifest_required_and_missing(
+    settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
+    monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: settings)
+
+    storage = StorageManager(Path(settings.storage_root))
+    bars = pd.DataFrame(
+        {
+            "ts": [
+                pd.Timestamp("2025-01-02T14:30:00Z"),
+                pd.Timestamp("2025-01-02T14:31:00Z"),
+            ],
+            "open": [100.0, 100.1],
+            "high": [100.2, 100.3],
+            "low": [99.9, 100.0],
+            "close": [100.1, 100.2],
+            "volume": [1000.0, 1100.0],
+        }
+    )
+    storage.write_bars(bars, symbol="SPY", timeframe="1m")
+    storage.write_bars(bars, symbol="QQQ", timeframe="1m")
+
+    with pytest.raises(RuntimeError, match="no run manifest found"):
+        cli.verify_readiness(
+            config=Path("configs/settings.example.yaml"),
+            start="2025-01-02T14:30:00Z",
+            end="2025-01-02T21:00:00Z",
+            symbols="",
+            timeframes="1m",
+            output=Path("ignored.json"),
+            require_report_artifacts=False,
+            require_run_manifest=True,
+        )
+
+
+def test_write_run_manifest_writes_expected_payload(
+    settings,
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
+    monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: settings)
+
+    output_path = tmp_path / "run_manifest.json"
+    cli.write_run_manifest(
+        config=Path("configs/settings.example.yaml"),
+        profile="custom",
+        stages="validate-config,backfill,replay,report",
+        analysis_start="2025-01-01T00:00:00Z",
+        analysis_end="2025-12-31T23:59:59Z",
+        warmup_days=120,
+        warmup_start="2024-09-03T00:00:00Z",
+        backfill_start="2024-09-03T00:00:00Z",
+        backfill_end="2025-12-31T23:59:59Z",
+        replay_start="2024-09-03T00:00:00Z",
+        replay_end="2025-12-31T23:59:59Z",
+        report_range="2025-01-01T00:00:00Z,2025-12-31T23:59:59Z",
+        symbols="SPY,QQQ",
+        timeframes="1m,1D",
+        command="make e2e",
+        run_id="unit_test_run",
+        output=output_path,
+    )
+    stdout = capsys.readouterr().out
+    assert "run_manifest_path=" in stdout
+    assert output_path.exists()
+    assert output_path.with_suffix(".json.sha256").exists()
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "ok"
+    assert payload["profile"] == "custom"
+    assert payload["stages_requested"] == [
+        "validate-config",
+        "backfill",
+        "replay",
+        "report",
+    ]
+    assert payload["resolved_windows"]["warmup_days"] == 120
