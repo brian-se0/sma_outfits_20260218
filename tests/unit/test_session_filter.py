@@ -68,3 +68,53 @@ def test_regular_session_filter_respects_early_close_from_calendar() -> None:
     )
     kept_local = filtered["ts"].dt.tz_convert(timezone).dt.strftime("%H:%M").to_list()
     assert kept_local == ["12:59", "13:00"]
+
+
+def test_regular_session_filter_fails_when_calendar_date_is_missing() -> None:
+    timezone = "America/New_York"
+    frame = pd.DataFrame(
+        {
+            "ts": [pd.Timestamp("2025-01-02T14:30:00Z")],
+            "open": [1.0],
+            "high": [1.1],
+            "low": [0.9],
+            "close": [1.0],
+            "volume": [10],
+        }
+    )
+    sessions: dict[str, tuple[pd.Timestamp, pd.Timestamp] | None] = {}
+    try:
+        apply_regular_session_filter(
+            frame,
+            session_windows=sessions,
+            timezone=timezone,
+        )
+    except RuntimeError as exc:
+        assert "Missing dates" in str(exc)
+    else:
+        raise AssertionError("Expected regular-session filter to fail for missing calendar date")
+
+
+def test_regular_session_filter_fails_for_closed_session_date_with_bars() -> None:
+    timezone = "America/New_York"
+    frame = pd.DataFrame(
+        {
+            "ts": [pd.Timestamp("2025-01-04T15:00:00Z")],
+            "open": [1.0],
+            "high": [1.1],
+            "low": [0.9],
+            "close": [1.0],
+            "volume": [10],
+        }
+    )
+    sessions = {"2025-01-04": None}
+    try:
+        apply_regular_session_filter(
+            frame,
+            session_windows=sessions,
+            timezone=timezone,
+        )
+    except RuntimeError as exc:
+        assert "closed sessions" in str(exc)
+    else:
+        raise AssertionError("Expected regular-session filter to fail for closed-session bars")

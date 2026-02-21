@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime
+import math
 from pathlib import Path
 from statistics import median
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from sma_outfits.events import PositionEvent, SignalEvent, StrikeEvent
@@ -61,6 +63,10 @@ def build_summary(
         },
         "period_summary_daily": _period_summary(closed_outcomes, period="daily"),
         "period_summary_monthly": _period_summary(closed_outcomes, period="monthly"),
+        "statistical_validation": _build_statistical_validation(
+            closed_outcomes=closed_outcomes,
+            total_signals=len(signals),
+        ),
     }
     return summary
 
@@ -277,6 +283,16 @@ def _render_markdown_section(
     title: str,
     summary: dict[str, Any],
 ) -> list[str]:
+    statistical_validation = summary.get("statistical_validation", {})
+    production_readiness = (
+        statistical_validation.get("production_readiness", {})
+        if isinstance(statistical_validation, dict)
+        else {}
+    )
+    ready_for_production = bool(production_readiness.get("ready_for_production", False))
+    blocking_reasons = production_readiness.get("blocking_reasons", [])
+    if not isinstance(blocking_reasons, list):
+        blocking_reasons = []
     markdown: list[str] = [
         f"## {title}",
         f"- total_strikes: `{summary['total_strikes']}`",
@@ -284,6 +300,8 @@ def _render_markdown_section(
         f"- total_position_events: `{summary['total_position_events']}`",
         f"- closed_positions: `{summary['closed_positions']}`",
         f"- hit_rate: `{summary['hit_rate']:.4f}`",
+        f"- statistical_ready_for_production: `{str(ready_for_production).lower()}`",
+        "- statistical_blockers: `{}`".format(", ".join(blocking_reasons) if blocking_reasons else "none"),
         "",
         "### R Outcomes",
         f"- total_realized_r: `{summary['r_outcome']['total_realized_r']:.4f}`",
@@ -446,6 +464,296 @@ def _r_bucket_counts(values: list[float]) -> dict[str, int]:
         else:
             buckets[">=3R"] += 1
     return buckets
+
+
+def _build_statistical_validation(
+    *,
+    closed_outcomes: list[dict[str, Any]],
+    total_signals: int,
+) -> dict[str, Any]:
+    realized_r = [float(row["realized_r"]) for row in closed_outcomes]
+    distribution = _distribution_summary(realized_r)
+    risk_diagnostics = _risk_diagnostics(realized_r)
+    uncertainty = _uncertainty_summary(realized_r)
+    multiple_testing = _multiple_testing_summary(closed_outcomes)
+    robustness = _robustness_summary(closed_outcomes)
+
+    minimum_closed_positions = 30
+    blockers: list[str] = []
+    if len(realized_r) < minimum_closed_positions:
+        blockers.append(
+            "closed_positions_below_minimum:{}<{}".format(
+                len(realized_r),
+                minimum_closed_positions,
+            )
+        )
+    ci = uncertainty.get("bootstrap_mean_r_ci_95")
+    if isinstance(ci, dict):
+        lower = float(ci.get("lower", 0.0))
+        if lower <= 0.0:
+            blockers.append("bootstrap_ci_includes_non_positive_edge")
+    else:
+        blockers.append("bootstrap_ci_unavailable")
+
+    p_value = uncertainty.get("one_sided_p_value_mean_gt_zero")
+    if isinstance(p_value, float) and p_value > 0.05:
+        blockers.append("mean_return_not_significant_at_0.05")
+    if not isinstance(p_value, float):
+        blockers.append("hypothesis_test_unavailable")
+
+    effect_size = uncertainty.get("cohen_d")
+    if isinstance(effect_size, float) and effect_size < 0.2:
+        blockers.append("effect_size_below_small_threshold")
+    if not isinstance(effect_size, float):
+        blockers.append("effect_size_unavailable")
+
+    return {
+        "sample_size": {
+            "closed_positions": len(realized_r),
+            "total_signals": total_signals,
+            "signal_to_close_ratio": (len(realized_r) / total_signals) if total_signals else 0.0,
+        },
+        "distribution": distribution,
+        "risk_diagnostics": risk_diagnostics,
+        "uncertainty": uncertainty,
+        "multiple_testing_control": multiple_testing,
+        "robustness_checks": robustness,
+        "production_readiness": {
+            "ready_for_production": not blockers,
+            "minimum_closed_positions": minimum_closed_positions,
+            "blocking_reasons": blockers,
+        },
+    }
+
+
+def _distribution_summary(values: list[float]) -> dict[str, Any]:
+    if not values:
+        return {
+            "count": 0,
+            "mean": 0.0,
+            "median": 0.0,
+            "std": 0.0,
+            "skew": 0.0,
+            "kurtosis": 0.0,
+            "win_rate": 0.0,
+            "payoff_ratio": 0.0,
+            "expectancy": 0.0,
+        }
+    series = pd.Series(values, dtype="float64")
+    gains = [value for value in values if value > 0]
+    losses = [abs(value) for value in values if value < 0]
+    payoff_ratio = (float(np.mean(gains)) / float(np.mean(losses))) if gains and losses else 0.0
+    win_rate = len(gains) / len(values)
+    return {
+        "count": int(series.shape[0]),
+        "mean": float(series.mean()),
+        "median": float(series.median()),
+        "std": float(series.std(ddof=1)) if len(values) > 1 else 0.0,
+        "skew": float(series.skew()) if len(values) > 2 else 0.0,
+        "kurtosis": float(series.kurt()) if len(values) > 3 else 0.0,
+        "win_rate": win_rate,
+        "payoff_ratio": payoff_ratio,
+        "expectancy": float(series.mean()),
+    }
+
+
+def _risk_diagnostics(values: list[float]) -> dict[str, Any]:
+    if not values:
+        return {
+            "max_drawdown_r": 0.0,
+            "ulcer_index_r": 0.0,
+            "max_time_under_water_bars": 0,
+            "sharpe_annualized": 0.0,
+            "sortino_annualized": 0.0,
+            "annualization_assumption": "252 closed positions per year",
+            "turnover_proxy_positions_per_month": 0.0,
+        }
+    samples = np.array(values, dtype=float)
+    equity = np.cumsum(samples)
+    peaks = np.maximum.accumulate(equity)
+    drawdowns = equity - peaks
+    max_drawdown = float(drawdowns.min()) if drawdowns.size else 0.0
+    ulcer_index = float(math.sqrt(float(np.mean(np.square(drawdowns))))) if drawdowns.size else 0.0
+    max_tuw = _max_time_under_water(drawdowns.tolist())
+
+    mean_value = float(np.mean(samples))
+    std_value = float(np.std(samples, ddof=1)) if samples.size > 1 else 0.0
+    downside = samples[samples < 0.0]
+    downside_std = float(np.std(downside, ddof=1)) if downside.size > 1 else 0.0
+    annual_factor = math.sqrt(252.0)
+    sharpe = (mean_value / std_value) * annual_factor if std_value > 0 else 0.0
+    sortino = (mean_value / downside_std) * annual_factor if downside_std > 0 else 0.0
+    turnover_proxy = (len(values) / 12.0) if values else 0.0
+
+    return {
+        "max_drawdown_r": max_drawdown,
+        "ulcer_index_r": ulcer_index,
+        "max_time_under_water_bars": max_tuw,
+        "sharpe_annualized": sharpe,
+        "sortino_annualized": sortino,
+        "annualization_assumption": "252 closed positions per year",
+        "turnover_proxy_positions_per_month": turnover_proxy,
+    }
+
+
+def _max_time_under_water(drawdowns: list[float]) -> int:
+    max_streak = 0
+    streak = 0
+    for value in drawdowns:
+        if value < 0:
+            streak += 1
+            if streak > max_streak:
+                max_streak = streak
+        else:
+            streak = 0
+    return max_streak
+
+
+def _uncertainty_summary(values: list[float]) -> dict[str, Any]:
+    ci = _bootstrap_mean_ci(values)
+    test = _one_sided_mean_test(values)
+    return {
+        "bootstrap_mean_r_ci_95": ci,
+        "one_sided_p_value_mean_gt_zero": test["p_value"],
+        "test_statistic": test["test_statistic"],
+        "null_hypothesis": "mean(realized_r) <= 0",
+        "alternative_hypothesis": "mean(realized_r) > 0",
+        "cohen_d": test["cohen_d"],
+    }
+
+
+def _bootstrap_mean_ci(values: list[float]) -> dict[str, float] | None:
+    if not values:
+        return None
+    rng = np.random.default_rng(42)
+    samples = np.array(values, dtype=float)
+    n = samples.size
+    if n == 1:
+        mean_value = float(samples[0])
+        return {"lower": mean_value, "upper": mean_value}
+    boot_means = np.empty(2000, dtype=float)
+    for index in range(boot_means.size):
+        draw = rng.choice(samples, size=n, replace=True)
+        boot_means[index] = float(np.mean(draw))
+    return {
+        "lower": float(np.quantile(boot_means, 0.025)),
+        "upper": float(np.quantile(boot_means, 0.975)),
+    }
+
+
+def _one_sided_mean_test(values: list[float]) -> dict[str, float | None]:
+    if len(values) < 2:
+        return {"test_statistic": None, "p_value": None, "cohen_d": None}
+    samples = np.array(values, dtype=float)
+    mean_value = float(np.mean(samples))
+    std_value = float(np.std(samples, ddof=1))
+    if std_value <= 0:
+        p_value = 0.0 if mean_value > 0 else 1.0
+        return {"test_statistic": None, "p_value": p_value, "cohen_d": None}
+    t_stat = mean_value / (std_value / math.sqrt(float(len(samples))))
+    p_value = 1.0 - _normal_cdf(t_stat)
+    effect_size = mean_value / std_value
+    return {"test_statistic": float(t_stat), "p_value": float(p_value), "cohen_d": float(effect_size)}
+
+
+def _normal_cdf(value: float) -> float:
+    return 0.5 * (1.0 + math.erf(value / math.sqrt(2.0)))
+
+
+def _multiple_testing_summary(closed_outcomes: list[dict[str, Any]]) -> dict[str, Any]:
+    grouped: dict[str, list[float]] = defaultdict(list)
+    for row in closed_outcomes:
+        grouped[str(row["signal_type"])].append(float(row["realized_r"]))
+    raw: list[tuple[str, float]] = []
+    for label, values in grouped.items():
+        test = _one_sided_mean_test(values)
+        p_value = test["p_value"]
+        if isinstance(p_value, float):
+            raw.append((label, p_value))
+    adjusted = _fdr_bh(raw)
+    details = [
+        {
+            "label": label,
+            "raw_p_value": p_value,
+            "fdr_q_value": adjusted.get(label),
+        }
+        for label, p_value in sorted(raw, key=lambda item: item[0])
+    ]
+    return {
+        "method": "Benjamini-Hochberg FDR",
+        "tests": details,
+    }
+
+
+def _fdr_bh(values: list[tuple[str, float]]) -> dict[str, float]:
+    if not values:
+        return {}
+    ordered = sorted(values, key=lambda item: item[1])
+    m = len(ordered)
+    raw_q: list[float] = []
+    for rank, (_label, p_value) in enumerate(ordered, start=1):
+        raw_q.append(min(1.0, p_value * m / rank))
+    adjusted_q = raw_q[:]
+    for index in range(m - 2, -1, -1):
+        adjusted_q[index] = min(adjusted_q[index], adjusted_q[index + 1])
+    return {
+        ordered[index][0]: float(adjusted_q[index])
+        for index in range(m)
+    }
+
+
+def _robustness_summary(closed_outcomes: list[dict[str, Any]]) -> dict[str, Any]:
+    symbol_rows: dict[str, list[float]] = defaultdict(list)
+    timeframe_rows: dict[str, list[float]] = defaultdict(list)
+    monthly_rows: dict[str, list[float]] = defaultdict(list)
+    for row in closed_outcomes:
+        value = float(row["realized_r"])
+        symbol_rows[str(row["symbol"])].append(value)
+        timeframe_rows[str(row["timeframe"])].append(value)
+        close_ts = row.get("close_ts")
+        if close_ts is not None:
+            label = ensure_utc_timestamp(str(close_ts)).strftime("%Y-%m")
+            monthly_rows[label].append(value)
+    return {
+        "symbol_stability": _group_stability(symbol_rows),
+        "timeframe_stability": _group_stability(timeframe_rows),
+        "monthly_regimes": _group_stability(monthly_rows),
+        "outlier_stress": _outlier_stress([float(row["realized_r"]) for row in closed_outcomes]),
+    }
+
+
+def _group_stability(rows: dict[str, list[float]]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for label in sorted(rows.keys()):
+        values = rows[label]
+        output.append(
+            {
+                "label": label,
+                "count": len(values),
+                "mean_r": float(np.mean(values)) if values else 0.0,
+                "std_r": float(np.std(values, ddof=1)) if len(values) > 1 else 0.0,
+                "hit_rate": (sum(1 for value in values if value > 0) / len(values))
+                if values
+                else 0.0,
+            }
+        )
+    return output
+
+
+def _outlier_stress(values: list[float]) -> dict[str, Any]:
+    if len(values) < 3:
+        return {
+            "base_mean_r": float(np.mean(values)) if values else 0.0,
+            "trimmed_mean_r": None,
+            "removed_values": [],
+        }
+    ordered = sorted(values)
+    trimmed = ordered[1:-1]
+    return {
+        "base_mean_r": float(np.mean(values)),
+        "trimmed_mean_r": float(np.mean(trimmed)),
+        "removed_values": [ordered[0], ordered[-1]],
+    }
 
 
 def _period_summary(rows: list[dict[str, Any]], period: str) -> list[dict[str, Any]]:

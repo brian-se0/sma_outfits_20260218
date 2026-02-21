@@ -172,6 +172,20 @@ def apply_regular_session_filter(
         return frame.copy()
     out = frame.copy()
     out["ts"] = pd.to_datetime(out["ts"], utc=True)
+    local_dates = out["ts"].dt.tz_convert(timezone).dt.strftime("%Y-%m-%d")
+    unique_dates = sorted(set(local_dates.tolist()))
+    missing_dates = [date for date in unique_dates if date not in session_windows]
+    if missing_dates:
+        raise RuntimeError(
+            "Regular-session filter requires explicit session windows for all bar dates. "
+            f"Missing dates: {missing_dates}"
+        )
+    closed_dates = [date for date in unique_dates if session_windows.get(date) is None]
+    if closed_dates:
+        raise RuntimeError(
+            "Regular-session filter received bars for dates marked as closed sessions. "
+            f"Closed dates: {closed_dates}"
+        )
     mask = out["ts"].map(
         lambda ts: is_regular_session(
             pd.Timestamp(ts),

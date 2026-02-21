@@ -390,6 +390,10 @@ def run_live(
             reconnects = int(payload["reconnects"])
             stale_reconnects = int(payload["stale_feed_reconnects"])
             heartbeat_failures = int(payload["heartbeat_failures"])
+            data_gaps_detected = int(payload["data_gaps_detected"])
+            stale_symbol_warnings = int(payload["stale_symbol_warnings"])
+            reconciliation_checks = int(payload["reconciliation_checks"])
+            reconciliation_mismatches = int(payload["reconciliation_mismatches"])
             uptime_seconds = float(payload["uptime_seconds"])
         except KeyError as exc:
             raise RuntimeError(
@@ -400,6 +404,8 @@ def run_live(
                 f"status={status} recv={bars_received} proc={bars_processed} "
                 f"dup={duplicate_bars_skipped} reconn={reconnects} "
                 f"stale={stale_reconnects} hb={heartbeat_failures} "
+                f"gaps={data_gaps_detected} stale_sym={stale_symbol_warnings} "
+                f"recon={reconciliation_mismatches}/{reconciliation_checks} "
                 f"up={uptime_seconds:.0f}s"
             ),
             force=status != "running",
@@ -430,6 +436,10 @@ def run_live(
             "reconnects": result.reconnects,
             "stale_feed_reconnects": result.stale_feed_reconnects,
             "heartbeat_failures": result.heartbeat_failures,
+            "data_gaps_detected": result.data_gaps_detected,
+            "stale_symbol_warnings": result.stale_symbol_warnings,
+            "reconciliation_checks": result.reconciliation_checks,
+            "reconciliation_mismatches": result.reconciliation_mismatches,
             "started_at": result.started_at.isoformat(),
             "ended_at": result.ended_at.isoformat(),
         }

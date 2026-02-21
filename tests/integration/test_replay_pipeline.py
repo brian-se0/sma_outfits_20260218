@@ -597,3 +597,120 @@ def test_replay_cross_symbol_context_preflight_fails_when_reference_pair_not_sel
             symbols=["RWM"],
             timeframes=["30m"],
         )
+
+
+def test_replay_penny_reference_break_closes_on_cross_symbol_invalidation(
+    settings,
+    tmp_path: Path,
+) -> None:
+    outfits_path = tmp_path / "penny_refbreak_outfits.yaml"
+    outfits_path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: qqq_outfit",
+                "    periods: [1]",
+                "    description: qqq",
+                "    source_configuration: qqq",
+                "    source_ambiguous: false",
+                "  - id: spy_outfit",
+                "    periods: [1]",
+                "    description: spy",
+                "    source_configuration: spy",
+                "    source_ambiguous: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    replay_settings = settings.model_copy(deep=True)
+    replay_settings.outfits_path = str(outfits_path)
+    replay_settings.universe.symbols = ["QQQ", "SPY"]
+    replay_settings.timeframes.live = ["1m"]
+    replay_settings.archive.enabled = False
+    replay_settings.strategy.price_basis = "close"
+    replay_settings.strategy.strict_routing = True
+    replay_settings.strategy.allow_same_bar_exit = False
+    replay_settings.strategy.routes = [
+        RouteRule(
+            id="qqq_1m_ref",
+            symbol="QQQ",
+            timeframe="1m",
+            outfit_id="qqq_outfit",
+            key_period=1,
+            side="LONG",
+            signal_type="precision_buy",
+            micro_periods=[1],
+            ignore_close_below_key_when_micro_positive=False,
+            macro_gate="none",
+            risk_mode="singular_penny_only",
+            stop_offset=0.01,
+        ),
+        RouteRule(
+            id="spy_1m_primary",
+            symbol="SPY",
+            timeframe="1m",
+            outfit_id="spy_outfit",
+            key_period=1,
+            side="LONG",
+            signal_type="precision_buy",
+            micro_periods=[1],
+            ignore_close_below_key_when_micro_positive=False,
+            macro_gate="none",
+            risk_mode="penny_reference_break",
+            stop_offset=0.01,
+            cross_symbol_context={
+                "enabled": True,
+                "rules": [
+                    {
+                        "reference_route_id": "qqq_1m_ref",
+                        "require_macro_positive": True,
+                        "require_micro_positive": True,
+                    }
+                ],
+            },
+        ),
+    ]
+    storage = StorageManager(Path(replay_settings.storage_root))
+    qqq_bars = pd.DataFrame(
+        {
+            "ts": [
+                pd.Timestamp("2025-01-02T14:30:00Z"),
+                pd.Timestamp("2025-01-02T14:31:00Z"),
+            ],
+            "open": [200.0, 199.98],
+            "high": [200.1, 200.0],
+            "low": [199.9, 199.95],
+            "close": [200.0, 199.98],
+            "volume": [1000.0, 1100.0],
+        }
+    )
+    spy_bars = pd.DataFrame(
+        {
+            "ts": [
+                pd.Timestamp("2025-01-02T14:30:00Z"),
+                pd.Timestamp("2025-01-02T14:31:00Z"),
+            ],
+            "open": [100.0, 100.2],
+            "high": [100.1, 100.25],
+            "low": [99.99, 100.15],
+            "close": [100.0, 100.2],
+            "volume": [900.0, 950.0],
+        }
+    )
+    storage.write_bars(qqq_bars, symbol="QQQ", timeframe="1m")
+    storage.write_bars(spy_bars, symbol="SPY", timeframe="1m")
+
+    engine = ReplayEngine(settings=replay_settings, storage=storage)
+    result = engine.run(
+        start=pd.Timestamp("2025-01-02T14:30:00Z"),
+        end=pd.Timestamp("2025-01-02T14:31:00Z"),
+        symbols=["QQQ", "SPY"],
+        timeframes=["1m"],
+    )
+
+    assert len(result.signals) >= 1
+    assert any(
+        event.reason == "cross_symbol_reference_break"
+        for event in result.position_events
+    )

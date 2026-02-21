@@ -132,7 +132,7 @@ strategy:
       micro_periods: [16, 32, 64, 128, 256]
       ignore_close_below_key_when_micro_positive: true
       macro_gate: nas
-      risk_mode: atr_dynamic_stop
+      risk_mode: penny_reference_break
       stop_offset: 0.01
       confluence:
         enabled: true
@@ -152,7 +152,7 @@ strategy:
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
-      risk_mode: atr_dynamic_stop
+      risk_mode: penny_reference_break
       stop_offset: 0.01
       confluence:
         enabled: true
@@ -178,7 +178,7 @@ strategy:
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
-      risk_mode: atr_dynamic_stop
+      risk_mode: penny_reference_break
       stop_offset: 0.01
       confluence:
         enabled: true
@@ -198,7 +198,7 @@ strategy:
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
-      risk_mode: atr_dynamic_stop
+      risk_mode: penny_reference_break
       stop_offset: 0.01
       confluence:
         enabled: true
@@ -224,7 +224,7 @@ strategy:
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
-      risk_mode: atr_dynamic_stop
+      risk_mode: penny_reference_break
       stop_offset: 0.01
       confluence:
         enabled: true
@@ -244,7 +244,7 @@ strategy:
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
-      risk_mode: atr_dynamic_stop
+      risk_mode: penny_reference_break
       stop_offset: 0.01
       confluence:
         enabled: true
@@ -264,7 +264,7 @@ strategy:
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
-      risk_mode: atr_dynamic_stop
+      risk_mode: penny_reference_break
       stop_offset: 0.01
       confluence:
         enabled: true
@@ -284,7 +284,7 @@ strategy:
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
-      risk_mode: atr_dynamic_stop
+      risk_mode: penny_reference_break
       stop_offset: 0.01
       confluence:
         enabled: true
@@ -304,7 +304,7 @@ strategy:
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
-      risk_mode: atr_dynamic_stop
+      risk_mode: penny_reference_break
       stop_offset: 0.01
       confluence:
         enabled: true
@@ -324,7 +324,7 @@ strategy:
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
-      risk_mode: atr_dynamic_stop
+      risk_mode: penny_reference_break
       stop_offset: 0.01
       confluence:
         enabled: true
@@ -344,7 +344,7 @@ strategy:
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
-      risk_mode: atr_dynamic_stop
+      risk_mode: penny_reference_break
       stop_offset: 0.01
       confluence:
         enabled: true
@@ -390,7 +390,14 @@ live:
   stale_feed_seconds: 120
   heartbeat_interval_seconds: 20
   heartbeat_timeout_seconds: 10
+  state_persistence_enabled: true
+  state_flush_interval_seconds: 5.0
+  reconciliation_enabled: true
+  reconciliation_interval_seconds: 60.0
+  data_gap_threshold_seconds: 90
+  symbol_stale_threshold_seconds: 180
 
 storage_root: artifacts/svix211_106/storage
 events_root: artifacts/svix211_106/events
 outfits_path: src/sma_outfits/config/outfits.yaml
+

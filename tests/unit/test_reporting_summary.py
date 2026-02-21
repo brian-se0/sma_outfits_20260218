@@ -103,6 +103,8 @@ def test_build_summary_includes_r_outcomes_and_breakdowns() -> None:
     assert summary["r_outcome"]["bucket_counts"]["<=-1R"] == 1
     assert summary["hit_rate_by_side"]
     assert summary["period_summary_daily"]
+    assert summary["statistical_validation"]["sample_size"]["closed_positions"] == 2
+    assert summary["statistical_validation"]["production_readiness"]["ready_for_production"] is False
     signal_labels = {row["label"] for row in summary["hit_rate_by_signal_type"]}
     assert "magnetized_buy" in signal_labels
 

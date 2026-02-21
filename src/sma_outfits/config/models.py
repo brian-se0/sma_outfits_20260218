@@ -433,7 +433,11 @@ class RouteRule(BaseModel):
     micro_periods: list[int]
     ignore_close_below_key_when_micro_positive: bool = False
     macro_gate: Literal["none", "spx", "nas", "dji"] = "none"
-    risk_mode: Literal["singular_penny_only", "atr_dynamic_stop"] = "singular_penny_only"
+    risk_mode: Literal[
+        "singular_penny_only",
+        "penny_reference_break",
+        "atr_dynamic_stop",
+    ] = "singular_penny_only"
     stop_offset: float = 0.01
     confluence: RouteConfluenceConfig = Field(default_factory=RouteConfluenceConfig)
     atr: RouteATRConfig = Field(default_factory=RouteATRConfig)
@@ -562,6 +566,13 @@ class LiveConfig(BaseModel):
     stale_feed_seconds: int = 120
     heartbeat_interval_seconds: int = 20
     heartbeat_timeout_seconds: int = 10
+    state_persistence_enabled: bool = True
+    state_flush_interval_seconds: float = 5.0
+    state_file: str | None = None
+    reconciliation_enabled: bool = False
+    reconciliation_interval_seconds: float = 60.0
+    data_gap_threshold_seconds: int = 90
+    symbol_stale_threshold_seconds: int = 180
 
     @field_validator("runtime_minutes")
     @classmethod
@@ -572,7 +583,13 @@ class LiveConfig(BaseModel):
             raise ValueError("live.runtime_minutes must be > 0 when set")
         return value
 
-    @field_validator("warmup_minutes", "reconnect_max_attempts", "stale_feed_seconds")
+    @field_validator(
+        "warmup_minutes",
+        "reconnect_max_attempts",
+        "stale_feed_seconds",
+        "data_gap_threshold_seconds",
+        "symbol_stale_threshold_seconds",
+    )
     @classmethod
     def _positive_integers(cls, value: int) -> int:
         if value <= 0:
@@ -584,12 +601,24 @@ class LiveConfig(BaseModel):
         "reconnect_max_delay_seconds",
         "heartbeat_interval_seconds",
         "heartbeat_timeout_seconds",
+        "state_flush_interval_seconds",
+        "reconciliation_interval_seconds",
     )
     @classmethod
     def _positive_floats(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("live config values must be > 0")
         return value
+
+    @field_validator("state_file")
+    @classmethod
+    def _validate_state_file(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("live.state_file must be non-empty when provided")
+        return candidate
 
     @field_validator("reconnect_max_delay_seconds")
     @classmethod

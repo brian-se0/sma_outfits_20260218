@@ -842,3 +842,62 @@ def test_cross_symbol_context_rejects_duplicate_reference_route_ids(tmp_path: Pa
 
     with pytest.raises(ValueError, match="duplicate reference_route_id"):
         load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_strategy_route_accepts_penny_reference_break_risk_mode(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    outfits_path = tmp_path / "outfits.yaml"
+    outfits_path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: test_outfit",
+                "    periods: [10]",
+                "    description: test",
+                "    source_configuration: test",
+                "    source_ambiguous: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {
+        "outfits_path": str(outfits_path),
+        "strategy": {
+            "strict_routing": True,
+            "routes": [
+                {
+                    "id": "route-1",
+                    "symbol": "SPY",
+                    "timeframe": "1m",
+                    "outfit_id": "test_outfit",
+                    "key_period": 10,
+                    "side": "LONG",
+                    "signal_type": "precision_buy",
+                    "micro_periods": [10],
+                    "ignore_close_below_key_when_micro_positive": False,
+                    "macro_gate": "none",
+                    "risk_mode": "penny_reference_break",
+                    "stop_offset": 0.01,
+                }
+            ],
+        },
+    }
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    settings = load_settings(config_path=config_path, env_path=env_path)
+    assert settings.strategy.routes[0].risk_mode == "penny_reference_break"

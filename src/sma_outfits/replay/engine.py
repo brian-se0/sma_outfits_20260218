@@ -248,6 +248,8 @@ class ReplayEngine:
                             signal=signal,
                             symbol=work.bar.symbol,
                             ts=work.bar.ts,
+                            route_context=work.route_context,
+                            cross_context_lookup=_cross_context_lookup,
                         )
                     )
 

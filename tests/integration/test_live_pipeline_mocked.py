@@ -66,6 +66,49 @@ class CrossContextStreamFactory:
         return _generator()
 
 
+class DeterministicStreamFactory:
+    def __call__(self, market: str, symbols: list[str]):
+        async def _generator():
+            if market != "stocks":
+                while True:
+                    await asyncio.sleep(1.0)
+            yield _bar("SPY", "2025-01-02T14:30:00Z", 100.0)
+            yield _bar("SPY", "2025-01-02T14:31:00Z", 101.0)
+            while True:
+                await asyncio.sleep(1.0)
+
+        return _generator()
+
+
+class GapAndStaleStreamFactory:
+    def __call__(self, market: str, symbols: list[str]):
+        async def _generator():
+            if market != "stocks":
+                while True:
+                    await asyncio.sleep(1.0)
+            yield _bar("QQQ", "2025-01-02T14:30:00Z", 200.0)
+            yield _bar("SPY", "2025-01-02T14:30:00Z", 100.0)
+            yield _bar("SPY", "2025-01-02T14:35:00Z", 102.0)
+            while True:
+                await asyncio.sleep(1.0)
+
+        return _generator()
+
+
+class MockReconciliationRESTClient:
+    def fetch_open_positions(self):
+        return [{"symbol": "QQQ"}]
+
+    def fetch_open_orders(self):
+        return [{"symbol": "QQQ"}]
+
+    def fetch_bars(self, *args, **kwargs):
+        raise RuntimeError("fetch_bars should not be called in this test")
+
+    def fetch_calendar_sessions(self, *args, **kwargs):
+        raise RuntimeError("fetch_calendar_sessions should not be called in this test")
+
+
 def _live_settings_with_routes(
     settings,
     tmp_path: Path,
@@ -344,6 +387,166 @@ def test_live_pipeline_supports_cross_symbol_context_route_selected(
     assert result.bars_received >= 2
     signals = storage.load_events("signals")
     assert any(signal["route_id"] == "spy_1m_cross" for signal in signals)
+
+
+def test_live_pipeline_persists_state_and_prevents_duplicate_signals_on_restart(
+    settings,
+    tmp_path: Path,
+) -> None:
+    routes = [
+        RouteRule(
+            id="spy_1m_author",
+            symbol="SPY",
+            timeframe="1m",
+            outfit_id="test_outfit",
+            key_period=1,
+            side="LONG",
+            signal_type="optimized_buy",
+            micro_periods=[1],
+            ignore_close_below_key_when_micro_positive=False,
+            macro_gate="none",
+            risk_mode="singular_penny_only",
+            stop_offset=0.01,
+        )
+    ]
+    live_settings = _live_settings_with_routes(settings, tmp_path, routes)
+    live_settings.live.state_persistence_enabled = True
+    live_settings.live.state_file = str(Path(live_settings.storage_root) / "live_state.json")
+    storage = StorageManager(Path(live_settings.storage_root))
+
+    runner_one = LiveRunner(
+        settings=live_settings,
+        storage=storage,
+        stream_factory=DeterministicStreamFactory(),
+    )
+    asyncio.run(
+        runner_one.run(
+            symbols=["SPY"],
+            timeframes=["1m"],
+            runtime_seconds=0.4,
+            warmup_minutes=0,
+        )
+    )
+    first_signal_rows = storage.load_events("signals")
+    assert first_signal_rows
+
+    runner_two = LiveRunner(
+        settings=live_settings,
+        storage=storage,
+        stream_factory=DeterministicStreamFactory(),
+    )
+    asyncio.run(
+        runner_two.run(
+            symbols=["SPY"],
+            timeframes=["1m"],
+            runtime_seconds=0.4,
+            warmup_minutes=0,
+        )
+    )
+    second_signal_rows = storage.load_events("signals")
+    assert len(second_signal_rows) == len(first_signal_rows)
+    assert Path(live_settings.live.state_file).exists()
+
+
+def test_live_pipeline_reports_data_gap_and_stale_symbol_monitoring(
+    settings,
+    tmp_path: Path,
+) -> None:
+    routes = [
+        RouteRule(
+            id="spy_1m_author",
+            symbol="SPY",
+            timeframe="1m",
+            outfit_id="test_outfit",
+            key_period=1,
+            side="LONG",
+            signal_type="optimized_buy",
+            micro_periods=[1],
+            ignore_close_below_key_when_micro_positive=False,
+            macro_gate="none",
+            risk_mode="singular_penny_only",
+            stop_offset=0.01,
+        ),
+        RouteRule(
+            id="qqq_1m_author",
+            symbol="QQQ",
+            timeframe="1m",
+            outfit_id="test_outfit",
+            key_period=1,
+            side="LONG",
+            signal_type="optimized_buy",
+            micro_periods=[1],
+            ignore_close_below_key_when_micro_positive=False,
+            macro_gate="none",
+            risk_mode="singular_penny_only",
+            stop_offset=0.01,
+        ),
+    ]
+    live_settings = _live_settings_with_routes(settings, tmp_path, routes)
+    live_settings.live.data_gap_threshold_seconds = 60
+    live_settings.live.symbol_stale_threshold_seconds = 120
+    storage = StorageManager(Path(live_settings.storage_root))
+    runner = LiveRunner(
+        settings=live_settings,
+        storage=storage,
+        stream_factory=GapAndStaleStreamFactory(),
+    )
+
+    result = asyncio.run(
+        runner.run(
+            symbols=["SPY", "QQQ"],
+            timeframes=["1m"],
+            runtime_seconds=0.5,
+            warmup_minutes=0,
+        )
+    )
+
+    assert result.data_gaps_detected >= 1
+    assert result.stale_symbol_warnings >= 1
+
+
+def test_live_pipeline_reconciliation_tracks_mismatch_counts(
+    settings,
+    tmp_path: Path,
+) -> None:
+    routes = [
+        RouteRule(
+            id="spy_1m_author",
+            symbol="SPY",
+            timeframe="1m",
+            outfit_id="test_outfit",
+            key_period=1,
+            side="LONG",
+            signal_type="optimized_buy",
+            micro_periods=[1],
+            ignore_close_below_key_when_micro_positive=False,
+            macro_gate="none",
+            risk_mode="singular_penny_only",
+            stop_offset=0.01,
+        )
+    ]
+    live_settings = _live_settings_with_routes(settings, tmp_path, routes)
+    live_settings.live.reconciliation_enabled = True
+    live_settings.live.reconciliation_interval_seconds = 0.01
+    storage = StorageManager(Path(live_settings.storage_root))
+    runner = LiveRunner(
+        settings=live_settings,
+        storage=storage,
+        rest_client=MockReconciliationRESTClient(),  # type: ignore[arg-type]
+        stream_factory=DeterministicStreamFactory(),
+    )
+
+    result = asyncio.run(
+        runner.run(
+            symbols=["SPY"],
+            timeframes=["1m"],
+            runtime_seconds=0.4,
+            warmup_minutes=0,
+        )
+    )
+
+    assert result.reconciliation_checks >= 1
+    assert result.reconciliation_mismatches >= 1
 
 
 def _bar(symbol: str, ts: str, close: float) -> LiveBar:

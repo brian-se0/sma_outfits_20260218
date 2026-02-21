@@ -373,3 +373,134 @@ def test_atr_dynamic_stop_requires_route_history_during_evaluation() -> None:
             proxy_prices={},
             route_history=None,
         )
+
+
+def test_penny_reference_break_closes_on_primary_symbol_boundary() -> None:
+    route = _route(
+        route_id="spy_1m_refbreak",
+        risk_mode="penny_reference_break",
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={route.id: route},
+        allow_same_bar_exit=True,
+    )
+    opened_ts = datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc)
+    route_context = RouteBarContext(
+        route=route,
+        key_sma=100.0,
+        micro_positive=False,
+        macro_positive=True,
+    )
+    position = manager.open_position(
+        signal=_signal("refbreak-primary", route.id, 100.0),
+        symbol="SPY",
+        ts=opened_ts,
+        route_context=route_context,
+    )
+
+    events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=1), close=99.95, high=100.0, low=99.98),
+        proxy_prices={},
+        route_context=route_context,
+    )
+    assert len(events) == 1
+    assert events[0].reason == "penny_reference_break"
+    assert events[0].price == 99.99
+
+
+def test_penny_reference_break_supports_cross_symbol_reference_cut() -> None:
+    reference_route = RouteRule(
+        id="qqq_1m_ref",
+        symbol="QQQ",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+    )
+    primary_route = RouteRule(
+        id="spy_1m_primary",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="penny_reference_break",
+        stop_offset=0.01,
+        cross_symbol_context={
+            "enabled": True,
+            "rules": [
+                {
+                    "reference_route_id": "qqq_1m_ref",
+                    "require_macro_positive": True,
+                    "require_micro_positive": True,
+                }
+            ],
+        },
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={
+            primary_route.id: primary_route,
+            reference_route.id: reference_route,
+        },
+        allow_same_bar_exit=True,
+    )
+    opened_ts = datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc)
+    primary_context = RouteBarContext(
+        route=primary_route,
+        key_sma=100.0,
+        micro_positive=True,
+        macro_positive=True,
+    )
+    reference_context = RouteBarContext(
+        route=reference_route,
+        key_sma=200.0,
+        micro_positive=True,
+        macro_positive=True,
+    )
+    position = manager.open_position(
+        signal=_signal("refbreak-cross", primary_route.id, 100.0),
+        symbol="SPY",
+        ts=opened_ts,
+        route_context=primary_context,
+        cross_context_lookup=lambda route_id, _ts: (
+            reference_context if route_id == "qqq_1m_ref" else None
+        ),
+    )
+
+    events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=1), close=100.2, high=100.3, low=100.1),
+        proxy_prices={"QQQ": 199.98},
+        route_context=primary_context,
+    )
+    assert len(events) == 1
+    assert events[0].reason == "cross_symbol_reference_break"
+    assert events[0].price == 199.98
+
+
+def test_penny_reference_break_requires_route_context_on_open() -> None:
+    route = _route(route_id="spy_1m_refbreak", risk_mode="penny_reference_break")
+    manager = RiskManager(
+        migrations={},
+        routes={route.id: route},
+        allow_same_bar_exit=True,
+    )
+    with pytest.raises(RuntimeError, match="requires explicit route_context"):
+        manager.open_position(
+            signal=_signal("refbreak-context", route.id, 100.0),
+            symbol="SPY",
+            ts=datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc),
+        )

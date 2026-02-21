@@ -303,6 +303,69 @@ class AlpacaRESTClient:
                 sessions[day_key] = None
         return sessions
 
+    def fetch_open_positions(self) -> list[dict[str, object]]:
+        endpoint = f"{self.config.base_url.rstrip('/')}/v2/positions"
+        response = self._session.get(
+            endpoint,
+            timeout=self.timeout_seconds,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Alpaca request failed ({response.status_code}) for {endpoint}: {response.text}"
+            )
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise RuntimeError(
+                f"Unexpected Alpaca open-positions payload type: {type(payload).__name__} "
+                "(expected list)"
+            )
+        rows: list[dict[str, object]] = []
+        for index, row in enumerate(payload):
+            if not isinstance(row, dict):
+                raise RuntimeError(
+                    f"Alpaca positions payload contract violation ({endpoint}): "
+                    f"row[{index}] type={type(row).__name__} (expected dict)"
+                )
+            if "symbol" not in row:
+                raise RuntimeError(
+                    f"Alpaca positions payload contract violation ({endpoint}): "
+                    f"row[{index}] missing required key 'symbol'"
+                )
+            rows.append(row)
+        return rows
+
+    def fetch_open_orders(self) -> list[dict[str, object]]:
+        endpoint = f"{self.config.base_url.rstrip('/')}/v2/orders"
+        response = self._session.get(
+            endpoint,
+            params={"status": "open", "limit": 500, "direction": "desc"},
+            timeout=self.timeout_seconds,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Alpaca request failed ({response.status_code}) for {endpoint}: {response.text}"
+            )
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise RuntimeError(
+                f"Unexpected Alpaca open-orders payload type: {type(payload).__name__} "
+                "(expected list)"
+            )
+        rows: list[dict[str, object]] = []
+        for index, row in enumerate(payload):
+            if not isinstance(row, dict):
+                raise RuntimeError(
+                    f"Alpaca orders payload contract violation ({endpoint}): "
+                    f"row[{index}] type={type(row).__name__} (expected dict)"
+                )
+            if "symbol" not in row:
+                raise RuntimeError(
+                    f"Alpaca orders payload contract violation ({endpoint}): "
+                    f"row[{index}] missing required key 'symbol'"
+                )
+            rows.append(row)
+        return rows
+
     def _get_json(self, endpoint: str, params: dict[str, str | int]) -> dict:
         response = self._session.get(
             endpoint,
