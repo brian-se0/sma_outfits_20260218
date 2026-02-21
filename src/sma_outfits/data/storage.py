@@ -53,17 +53,35 @@ class StorageManager:
             try:
                 next_chunk.to_parquet(path, index=False)
             except OSError as exc:
+                probe_error = self._probe_partition_writability(directory)
                 raise RuntimeError(
-                    "Failed to write parquet partition '{}'. "
-                    "Underlying OS error: {}. "
-                    "This can indicate a corrupted partition directory. "
-                    "Remove the affected date partition directory and rerun backfill.".format(
-                        path,
-                        exc,
+                    _build_partition_write_error(
+                        path=path,
+                        directory=directory,
+                        write_error=exc,
+                        probe_error=probe_error,
                     )
                 ) from exc
             written += len(next_chunk)
         return written
+
+    def _probe_partition_writability(self, directory: Path) -> OSError | None:
+        probe_name = f".write_probe_{time.time_ns()}_{self._write_sequence:06d}.tmp"
+        probe_path = directory / probe_name
+        try:
+            with probe_path.open("wb") as handle:
+                handle.write(b"")
+        except OSError as exc:
+            return exc
+        finally:
+            try:
+                probe_path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                # Probe cleanup must not hide the primary storage write error.
+                pass
+        return None
 
     def read_bars(
         self,
@@ -140,3 +158,49 @@ def _as_utc_timestamp(value: pd.Timestamp) -> pd.Timestamp:
     if ts.tzinfo is None:
         return ts.tz_localize("UTC")
     return ts.tz_convert("UTC")
+
+
+def _build_partition_write_error(
+    path: Path,
+    directory: Path,
+    write_error: OSError,
+    probe_error: OSError | None,
+) -> str:
+    base = (
+        "Failed to write parquet partition '{}'. "
+        "Underlying OS error: {}. "
+    ).format(path, _format_os_error(write_error))
+    recovery = "Remove the affected date partition directory and rerun backfill."
+    if probe_error is None:
+        return base + "This can indicate a corrupted partition directory. " + recovery
+
+    if _is_filesystem_corruption_error(probe_error):
+        return (
+            base
+            + "Partition writability probe for '{}' failed: {}. "
+            + "Root cause: filesystem reports the partition directory is corrupted or unreadable. "
+            + recovery
+        ).format(directory, _format_os_error(probe_error))
+
+    return (
+        base
+        + "Partition writability probe for '{}' failed: {}. "
+        + "Root cause: partition directory is not writable. "
+        + recovery
+    ).format(directory, _format_os_error(probe_error))
+
+
+def _format_os_error(error: OSError) -> str:
+    details = [str(error)]
+    winerror = getattr(error, "winerror", None)
+    if winerror is not None:
+        details.append(f"(winerror={winerror})")
+    return " ".join(details)
+
+
+def _is_filesystem_corruption_error(error: OSError) -> bool:
+    winerror = getattr(error, "winerror", None)
+    if winerror == 1392:
+        return True
+    lowered = str(error).lower()
+    return "corrupted and unreadable" in lowered
