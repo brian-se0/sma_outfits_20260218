@@ -173,10 +173,18 @@ def _compute_signal_outcomes(
         closed = False
 
         events = sorted(grouped_positions.get(signal.id, []), key=lambda row: row.ts)
+        fill_events = [event for event in events if event.action in {"partial_take", "close"}]
+        realized_qty = sum(float(event.qty) for event in fill_events)
+        if fill_events and realized_qty <= 0:
+            raise RuntimeError(
+                "Signal outcome contract violation: non-positive realized_qty "
+                f"(signal_id={signal.id})"
+            )
         for event in events:
             if event.action in {"partial_take", "close"}:
+                qty_weight = float(event.qty) / realized_qty if realized_qty > 0 else 0.0
                 realized_r += (
-                    float(event.qty)
+                    qty_weight
                     * direction
                     * ((float(event.price) - signal.entry) / risk_unit)
                 )

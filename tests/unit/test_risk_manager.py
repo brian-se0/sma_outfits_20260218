@@ -18,6 +18,7 @@ def _route(
     risk_mode: str = "singular_penny_only",
     atr_period: int = 14,
     atr_multiplier: float = 1.5,
+    risk_dollar_per_trade: float | None = None,
 ) -> RouteRule:
     return RouteRule(
         id=route_id,
@@ -32,6 +33,7 @@ def _route(
         macro_gate="none",
         risk_mode=risk_mode,  # type: ignore[arg-type]
         stop_offset=0.01,
+        risk_dollar_per_trade=risk_dollar_per_trade,
         atr={
             "period": atr_period,
             "multiplier": atr_multiplier,
@@ -488,7 +490,111 @@ def test_penny_reference_break_supports_cross_symbol_reference_cut() -> None:
     )
     assert len(events) == 1
     assert events[0].reason == "cross_symbol_reference_break"
-    assert events[0].price == 199.98
+    assert events[0].price == 100.2
+
+
+def test_penny_reference_break_cross_symbol_trigger_uses_proxy_threshold() -> None:
+    reference_route = RouteRule(
+        id="qqq_1m_ref",
+        symbol="QQQ",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+    )
+    primary_route = RouteRule(
+        id="spy_1m_primary",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="penny_reference_break",
+        stop_offset=0.01,
+        cross_symbol_context={
+            "enabled": True,
+            "rules": [
+                {
+                    "reference_route_id": "qqq_1m_ref",
+                    "require_macro_positive": True,
+                    "require_micro_positive": True,
+                }
+            ],
+        },
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={
+            primary_route.id: primary_route,
+            reference_route.id: reference_route,
+        },
+        allow_same_bar_exit=True,
+    )
+    opened_ts = datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc)
+    primary_context = RouteBarContext(
+        route=primary_route,
+        key_sma=100.0,
+        micro_positive=True,
+        macro_positive=True,
+    )
+    reference_context = RouteBarContext(
+        route=reference_route,
+        key_sma=200.0,
+        micro_positive=True,
+        macro_positive=True,
+    )
+    position = manager.open_position(
+        signal=_signal("refbreak-cross-nohit", primary_route.id, 100.0),
+        symbol="SPY",
+        ts=opened_ts,
+        route_context=primary_context,
+        cross_context_lookup=lambda route_id, _ts: (
+            reference_context if route_id == "qqq_1m_ref" else None
+        ),
+    )
+
+    events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=1), close=100.2, high=100.3, low=100.1),
+        proxy_prices={"QQQ": 200.01},
+        route_context=primary_context,
+    )
+    assert events == []
+    assert not position.closed
+
+
+def test_open_position_uses_dynamic_sizing_from_risk_dollar_per_trade() -> None:
+    route = _route(route_id="spy_1m_dynamic", risk_dollar_per_trade=5.0)
+    manager = RiskManager(
+        migrations={},
+        routes={route.id: route},
+        allow_same_bar_exit=True,
+    )
+    opened_ts = datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc)
+    position = manager.open_position(
+        signal=_signal("dynamic", route.id, 100.0),
+        symbol="SPY",
+        ts=opened_ts,
+    )
+    assert position.remaining_qty == 500.0
+
+    events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=1), close=99.98, high=100.02, low=99.95),
+        proxy_prices={},
+    )
+    assert len(events) == 1
+    assert events[0].qty == 500.0
 
 
 def test_penny_reference_break_requires_route_context_on_open() -> None:

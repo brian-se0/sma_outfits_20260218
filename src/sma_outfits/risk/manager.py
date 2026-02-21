@@ -49,6 +49,7 @@ class RiskManager:
         partial_take_r: float = 1.0,
         final_take_r: float = 3.0,
         timeout_bars: int = 120,
+        risk_dollar_per_trade: float = 1.0,
         *,
         migrations: dict[str, Any],
         routes: dict[str, RouteRule],
@@ -59,6 +60,9 @@ class RiskManager:
         self.partial_take_r = partial_take_r
         self.final_take_r = final_take_r
         self.timeout_bars = timeout_bars
+        if risk_dollar_per_trade <= 0:
+            raise ValueError("risk_dollar_per_trade must be > 0")
+        self.risk_dollar_per_trade = float(risk_dollar_per_trade)
         self.allow_same_bar_exit = allow_same_bar_exit
         if not isinstance(migrations, dict):
             raise TypeError("migrations must be an explicit dict")
@@ -78,6 +82,21 @@ class RiskManager:
     ) -> ManagedPosition:
         route = self._require_route(signal.route_id)
         reference_break_rules: tuple[ReferenceBreakRule, ...] = ()
+        normalized_stop = round(float(signal.stop), 6)
+        risk_unit = abs(float(signal.entry) - normalized_stop)
+        if risk_unit <= 0:
+            raise ValueError("position stop must differ from entry")
+        risk_dollar_per_trade = (
+            float(route.risk_dollar_per_trade)
+            if route.risk_dollar_per_trade is not None
+            else self.risk_dollar_per_trade
+        )
+        qty = round(risk_dollar_per_trade / risk_unit, 6)
+        if qty <= 0:
+            raise RuntimeError(
+                "Computed position qty must be > 0 "
+                f"(signal_id={signal.id}, route_id={signal.route_id})"
+            )
         if route.risk_mode == "penny_reference_break":
             reference_break_rules = self._build_reference_break_rules(
                 signal=signal,
@@ -91,9 +110,10 @@ class RiskManager:
             symbol=symbol,
             side=signal.side,
             entry=signal.entry,
-            stop=round(float(signal.stop), 6),
+            stop=normalized_stop,
             opened_ts=ts,
             route_id=signal.route_id,
+            remaining_qty=qty,
             reference_break_rules=reference_break_rules,
         )
 
@@ -405,7 +425,8 @@ class RiskManager:
                 "Missing proxy price for cross-symbol reference break: "
                 f"signal_id={position.signal_id} symbol={reference_break.symbol}"
             )
-        return round(float(proxy_prices[reference_break.symbol]), 6)
+        # Cross-symbol triggers liquidate the traded symbol at its own bar price.
+        return round(float(bar.close), 6)
 
     def _build_reference_break_rules(
         self,

@@ -439,6 +439,7 @@ class RouteRule(BaseModel):
         "atr_dynamic_stop",
     ] = "singular_penny_only"
     stop_offset: float = 0.01
+    risk_dollar_per_trade: float | None = None
     confluence: RouteConfluenceConfig = Field(default_factory=RouteConfluenceConfig)
     atr: RouteATRConfig = Field(default_factory=RouteATRConfig)
     cross_symbol_context: RouteCrossSymbolContextConfig = Field(
@@ -499,6 +500,18 @@ class RouteRule(BaseModel):
             raise ValueError("strategy route stop_offset must be > 0")
         return value
 
+    @field_validator("risk_dollar_per_trade")
+    @classmethod
+    def _validate_route_risk_dollar_per_trade(
+        cls,
+        value: float | None,
+    ) -> float | None:
+        if value is None:
+            return value
+        if value <= 0:
+            raise ValueError("strategy route risk_dollar_per_trade must be > 0 when set")
+        return value
+
 
 def _default_strategy_routes() -> list[RouteRule]:
     return [RouteRule.model_validate(route) for route in DEFAULT_STRATEGY_ROUTES]
@@ -532,6 +545,7 @@ class RiskConfig(BaseModel):
     partial_take_r: float = 1.0
     final_take_r: float = 3.0
     timeout_bars: int = 120
+    risk_dollar_per_trade: float = 1.0
     migrations: dict[str, RiskMigrationConfig] = Field(default_factory=dict)
 
     @field_validator("timeout_bars")
@@ -539,6 +553,13 @@ class RiskConfig(BaseModel):
     def _timeout_positive(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("risk.timeout_bars must be > 0")
+        return value
+
+    @field_validator("risk_dollar_per_trade")
+    @classmethod
+    def _risk_dollar_per_trade_positive(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("risk.risk_dollar_per_trade must be > 0")
         return value
 
 

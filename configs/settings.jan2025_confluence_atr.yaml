@@ -167,6 +167,7 @@ risk:
   partial_take_r: 1.0
   final_take_r: 3.0
   timeout_bars: 120
+  risk_dollar_per_trade: 1.0
   migrations:
     AMDL:
       proxy_symbol: SMH

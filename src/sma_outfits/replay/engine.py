@@ -85,6 +85,7 @@ class ReplayEngine:
             partial_take_r=self.settings.risk.partial_take_r,
             final_take_r=self.settings.risk.final_take_r,
             timeout_bars=self.settings.risk.timeout_bars,
+            risk_dollar_per_trade=self.settings.risk.risk_dollar_per_trade,
             migrations={
                 symbol: migration.model_dump()
                 for symbol, migration in self.settings.risk.migrations.items()

@@ -109,6 +109,50 @@ def test_build_summary_includes_r_outcomes_and_breakdowns() -> None:
     assert "magnetized_buy" in signal_labels
 
 
+def test_build_summary_normalizes_r_by_total_realized_qty() -> None:
+    strike = StrikeEvent(
+        id="strike-qty",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="outfit-a",
+        period=10,
+        sma_value=100.0,
+        bar_ts=datetime(2025, 1, 2, 14, 30, tzinfo=timezone.utc),
+        tolerance=0.01,
+        trigger_mode="bar_touch",
+    )
+    signal = SignalEvent(
+        id="signal-qty",
+        strike_id="strike-qty",
+        route_id="route-qty",
+        side="LONG",
+        signal_type="precision_buy",
+        entry=100.0,
+        stop=99.0,
+        confidence="HIGH",
+        session_type="regular",
+    )
+    close_event = PositionEvent(
+        id="p-qty-close",
+        signal_id="signal-qty",
+        action="close",
+        qty=100.0,
+        price=101.0,
+        reason="+1R_final_take",
+        ts=datetime(2025, 1, 2, 14, 31, tzinfo=timezone.utc),
+    )
+
+    summary = build_summary(
+        strikes=[strike],
+        signals=[signal],
+        position_events=[close_event],
+    )
+
+    assert summary["r_outcome"]["total_realized_r"] == 1.0
+    assert summary["r_outcome"]["avg_realized_r"] == 1.0
+    assert summary["hit_rate"] == 1.0
+
+
 def test_build_summary_from_records_applies_time_range() -> None:
     strike = StrikeEvent(
         id="strike-1",
