@@ -439,6 +439,7 @@ class RouteRule(BaseModel):
         "atr_dynamic_stop",
     ] = "singular_penny_only"
     stop_offset: float = 0.01
+    dynamic_reference_migration: bool = False
     risk_dollar_per_trade: float | None = None
     confluence: RouteConfluenceConfig = Field(default_factory=RouteConfluenceConfig)
     atr: RouteATRConfig = Field(default_factory=RouteATRConfig)

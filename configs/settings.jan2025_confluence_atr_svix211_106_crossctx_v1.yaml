@@ -134,6 +134,7 @@ strategy:
       macro_gate: nas
       risk_mode: penny_reference_break
       stop_offset: 0.01
+      dynamic_reference_migration: true
       confluence:
         enabled: true
         min_outfit_alignment_count: 3
@@ -154,6 +155,7 @@ strategy:
       macro_gate: none
       risk_mode: penny_reference_break
       stop_offset: 0.01
+      dynamic_reference_migration: true
       confluence:
         enabled: true
         min_outfit_alignment_count: 3
@@ -180,6 +182,7 @@ strategy:
       macro_gate: none
       risk_mode: penny_reference_break
       stop_offset: 0.01
+      dynamic_reference_migration: true
       confluence:
         enabled: true
         min_outfit_alignment_count: 3
@@ -200,6 +203,7 @@ strategy:
       macro_gate: none
       risk_mode: penny_reference_break
       stop_offset: 0.01
+      dynamic_reference_migration: true
       confluence:
         enabled: true
         min_outfit_alignment_count: 3
@@ -226,6 +230,7 @@ strategy:
       macro_gate: none
       risk_mode: penny_reference_break
       stop_offset: 0.01
+      dynamic_reference_migration: true
       confluence:
         enabled: true
         min_outfit_alignment_count: 3
@@ -246,6 +251,7 @@ strategy:
       macro_gate: none
       risk_mode: penny_reference_break
       stop_offset: 0.01
+      dynamic_reference_migration: true
       confluence:
         enabled: true
         min_outfit_alignment_count: 3
@@ -266,6 +272,7 @@ strategy:
       macro_gate: none
       risk_mode: penny_reference_break
       stop_offset: 0.01
+      dynamic_reference_migration: true
       confluence:
         enabled: true
         min_outfit_alignment_count: 3
@@ -286,6 +293,7 @@ strategy:
       macro_gate: none
       risk_mode: penny_reference_break
       stop_offset: 0.01
+      dynamic_reference_migration: true
       confluence:
         enabled: true
         min_outfit_alignment_count: 3
@@ -306,6 +314,7 @@ strategy:
       macro_gate: none
       risk_mode: penny_reference_break
       stop_offset: 0.01
+      dynamic_reference_migration: true
       confluence:
         enabled: true
         min_outfit_alignment_count: 3
@@ -326,6 +335,7 @@ strategy:
       macro_gate: none
       risk_mode: penny_reference_break
       stop_offset: 0.01
+      dynamic_reference_migration: true
       confluence:
         enabled: true
         min_outfit_alignment_count: 3
@@ -346,6 +356,7 @@ strategy:
       macro_gate: none
       risk_mode: penny_reference_break
       stop_offset: 0.01
+      dynamic_reference_migration: true
       confluence:
         enabled: true
         min_outfit_alignment_count: 3
@@ -401,4 +412,6 @@ live:
 storage_root: artifacts/svix211_106/storage
 events_root: artifacts/svix211_106/events
 outfits_path: src/sma_outfits/config/outfits.yaml
+
+
 

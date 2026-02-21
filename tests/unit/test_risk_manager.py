@@ -16,6 +16,7 @@ def _route(
     route_id: str = "spy_1m_author",
     ignore_micro_override: bool = False,
     risk_mode: str = "singular_penny_only",
+    dynamic_reference_migration: bool = False,
     atr_period: int = 14,
     atr_multiplier: float = 1.5,
     risk_dollar_per_trade: float | None = None,
@@ -33,6 +34,7 @@ def _route(
         macro_gate="none",
         risk_mode=risk_mode,  # type: ignore[arg-type]
         stop_offset=0.01,
+        dynamic_reference_migration=dynamic_reference_migration,
         risk_dollar_per_trade=risk_dollar_per_trade,
         atr={
             "period": atr_period,
@@ -571,6 +573,264 @@ def test_penny_reference_break_cross_symbol_trigger_uses_proxy_threshold() -> No
     )
     assert events == []
     assert not position.closed
+
+
+def test_dynamic_reference_migration_updates_primary_reference_level() -> None:
+    route = _route(
+        route_id="spy_1m_dynamic_ref",
+        risk_mode="penny_reference_break",
+        dynamic_reference_migration=True,
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={route.id: route},
+        allow_same_bar_exit=True,
+    )
+    opened_ts = datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc)
+    open_context = RouteBarContext(
+        route=route,
+        key_sma=100.0,
+        micro_positive=False,
+        macro_positive=False,
+    )
+    position = manager.open_position(
+        signal=_signal("refbreak-dynamic-primary", route.id, 100.0),
+        symbol="SPY",
+        ts=opened_ts,
+        route_context=open_context,
+    )
+    assert position.current_reference_price == 100.0
+
+    update_context = RouteBarContext(
+        route=route,
+        key_sma=100.2,
+        micro_positive=False,
+        macro_positive=False,
+    )
+    events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=1), close=100.25, high=100.3, low=100.05),
+        proxy_prices={},
+        route_context=update_context,
+    )
+    assert events == []
+    assert not position.closed
+    assert position.current_reference_price == 100.2
+    assert position.reference_break_rules[0].level == 100.2
+
+
+def test_dynamic_reference_migration_does_not_optimize_without_cross_reference_rules() -> None:
+    route = _route(
+        route_id="spy_1m_dynamic_no_cross_opt",
+        risk_mode="penny_reference_break",
+        dynamic_reference_migration=True,
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={route.id: route},
+        allow_same_bar_exit=True,
+    )
+    opened_ts = datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc)
+    context_positive = RouteBarContext(
+        route=route,
+        key_sma=100.0,
+        micro_positive=True,
+        macro_positive=True,
+    )
+    position = manager.open_position(
+        signal=_signal("refbreak-dynamic-no-cross-opt", route.id, 100.0),
+        symbol="SPY",
+        ts=opened_ts,
+        route_context=context_positive,
+    )
+
+    close_events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=1), close=99.97, high=100.0, low=99.98),
+        proxy_prices={},
+        route_context=context_positive,
+    )
+    assert not position.buy_hold_optimized
+    assert len(close_events) == 1
+    assert close_events[0].reason == "penny_reference_break"
+
+
+def test_dynamic_reference_migration_buy_hold_optimization_skips_primary_stop_while_positive() -> None:
+    reference_route = RouteRule(
+        id="qqq_1m_ref_hold",
+        symbol="QQQ",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+    )
+    route = RouteRule(
+        id="spy_1m_dynamic_hold",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="penny_reference_break",
+        stop_offset=0.01,
+        dynamic_reference_migration=True,
+        cross_symbol_context={
+            "enabled": True,
+            "rules": [
+                {
+                    "reference_route_id": "qqq_1m_ref_hold",
+                    "require_macro_positive": True,
+                    "require_micro_positive": True,
+                }
+            ],
+        },
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={
+            route.id: route,
+            reference_route.id: reference_route,
+        },
+        allow_same_bar_exit=True,
+    )
+    opened_ts = datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc)
+    context_positive = RouteBarContext(
+        route=route,
+        key_sma=100.0,
+        micro_positive=True,
+        macro_positive=True,
+    )
+    reference_context = RouteBarContext(
+        route=reference_route,
+        key_sma=200.0,
+        micro_positive=True,
+        macro_positive=True,
+    )
+    position = manager.open_position(
+        signal=_signal("refbreak-dynamic-hold", route.id, 100.0),
+        symbol="SPY",
+        ts=opened_ts,
+        route_context=context_positive,
+        cross_context_lookup=lambda route_id, _ts: (
+            reference_context if route_id == "qqq_1m_ref_hold" else None
+        ),
+    )
+
+    hold_events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=1), close=100.15, high=100.2, low=99.98),
+        proxy_prices={"QQQ": 200.02},
+        route_context=context_positive,
+        cross_context_lookup=lambda route_id, _ts: (
+            reference_context if route_id == "qqq_1m_ref_hold" else None
+        ),
+    )
+    assert hold_events == []
+    assert not position.closed
+    assert position.buy_hold_optimized
+
+    close_events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=2), close=100.05, high=100.1, low=99.97),
+        proxy_prices={"QQQ": 199.98},
+        route_context=context_positive,
+        cross_context_lookup=lambda route_id, _ts: (
+            reference_context if route_id == "qqq_1m_ref_hold" else None
+        ),
+    )
+    assert len(close_events) == 1
+    assert close_events[0].reason == "cross_symbol_reference_break"
+
+
+def test_dynamic_reference_migration_requires_cross_context_lookup_when_cross_rules_exist() -> None:
+    reference_route = RouteRule(
+        id="qqq_1m_ref",
+        symbol="QQQ",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+    )
+    primary_route = RouteRule(
+        id="spy_1m_primary_dynamic",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="LONG",
+        signal_type="optimized_buy",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="none",
+        risk_mode="penny_reference_break",
+        stop_offset=0.01,
+        dynamic_reference_migration=True,
+        cross_symbol_context={
+            "enabled": True,
+            "rules": [
+                {
+                    "reference_route_id": "qqq_1m_ref",
+                    "require_macro_positive": True,
+                    "require_micro_positive": True,
+                }
+            ],
+        },
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={
+            primary_route.id: primary_route,
+            reference_route.id: reference_route,
+        },
+        allow_same_bar_exit=True,
+    )
+    opened_ts = datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc)
+    primary_context = RouteBarContext(
+        route=primary_route,
+        key_sma=100.0,
+        micro_positive=False,
+        macro_positive=False,
+    )
+    reference_context = RouteBarContext(
+        route=reference_route,
+        key_sma=200.0,
+        micro_positive=True,
+        macro_positive=True,
+    )
+    position = manager.open_position(
+        signal=_signal("refbreak-dynamic-cross-lookup", primary_route.id, 100.0),
+        symbol="SPY",
+        ts=opened_ts,
+        route_context=primary_context,
+        cross_context_lookup=lambda route_id, _ts: (
+            reference_context if route_id == "qqq_1m_ref" else None
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="dynamic_reference_migration requires cross_context_lookup"):
+        manager.evaluate_bar(
+            position,
+            _bar(opened_ts + timedelta(minutes=1), close=100.2, high=100.3, low=100.1),
+            proxy_prices={"QQQ": 200.02},
+            route_context=primary_context,
+            cross_context_lookup=None,
+        )
 
 
 def test_open_position_uses_dynamic_sizing_from_risk_dollar_per_trade() -> None:

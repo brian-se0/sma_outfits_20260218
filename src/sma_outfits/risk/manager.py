@@ -25,6 +25,9 @@ class ManagedPosition:
     closed: bool = False
     risk_unit: float = 0.0
     reference_break_rules: tuple["ReferenceBreakRule", ...] = ()
+    current_reference_price: float | None = None
+    buy_hold_optimized: bool = False
+    last_reference_session: str | None = None
 
     def __post_init__(self) -> None:
         self.risk_unit = abs(self.entry - self.stop)
@@ -82,6 +85,8 @@ class RiskManager:
     ) -> ManagedPosition:
         route = self._require_route(signal.route_id)
         reference_break_rules: tuple[ReferenceBreakRule, ...] = ()
+        current_reference_price: float | None = None
+        last_reference_session: str | None = None
         normalized_stop = round(float(signal.stop), 6)
         risk_unit = abs(float(signal.entry) - normalized_stop)
         if risk_unit <= 0:
@@ -105,6 +110,11 @@ class RiskManager:
                 cross_context_lookup=cross_context_lookup,
                 opened_at=ts,
             )
+            current_reference_price = self._primary_reference_level(
+                reference_break_rules=reference_break_rules,
+                symbol=symbol,
+            )
+            last_reference_session = self._session_date_key(ts)
         return ManagedPosition(
             signal_id=signal.id,
             symbol=symbol,
@@ -115,6 +125,8 @@ class RiskManager:
             route_id=signal.route_id,
             remaining_qty=qty,
             reference_break_rules=reference_break_rules,
+            current_reference_price=current_reference_price,
+            last_reference_session=last_reference_session,
         )
 
     def prepare_signal_for_entry(
@@ -165,6 +177,7 @@ class RiskManager:
         proxy_prices: dict[str, float],
         route_context: RouteBarContext | None = None,
         route_history: pd.DataFrame | None = None,
+        cross_context_lookup: Callable[[str, datetime], RouteBarContext | None] | None = None,
     ) -> list[PositionEvent]:
         if position.closed:
             return []
@@ -229,6 +242,7 @@ class RiskManager:
                 route=route,
                 route_context=route_context,
                 proxy_prices=proxy_prices,
+                cross_context_lookup=cross_context_lookup,
             )
         if route.risk_mode == "atr_dynamic_stop":
             return self._evaluate_atr_dynamic_stop(
@@ -276,14 +290,39 @@ class RiskManager:
         route: RouteRule,
         route_context: RouteBarContext | None,
         proxy_prices: dict[str, float],
+        cross_context_lookup: Callable[[str, datetime], RouteBarContext | None] | None,
     ) -> list[PositionEvent]:
         if not position.reference_break_rules:
             raise RuntimeError(
                 "penny_reference_break position has no reference_break_rules "
                 f"(signal_id={position.signal_id}, route_id={position.route_id})"
             )
+        has_cross_reference_rules = self._has_cross_reference_rules(position)
+
+        if route.dynamic_reference_migration:
+            self._update_buy_hold_state(
+                position=position,
+                route=route,
+                route_context=route_context,
+                bar_ts=bar.ts,
+                cross_context_lookup=cross_context_lookup,
+            )
+            if position.buy_hold_optimized and not has_cross_reference_rules:
+                raise RuntimeError(
+                    "buy_hold_optimized requires at least one cross-symbol reference rule "
+                    f"(signal_id={position.signal_id}, route_id={position.route_id})"
+                )
 
         for reference_break in position.reference_break_rules:
+            if (
+                route.dynamic_reference_migration
+                and position.buy_hold_optimized
+                and has_cross_reference_rules
+                and reference_break.symbol == position.symbol
+            ):
+                # In buy-and-hold optimization mode, the primary symbol is no longer
+                # a liquidation trigger; only migrated cross-symbol rules can cut.
+                continue
             if not self._is_reference_break_hit(
                 reference_break=reference_break,
                 position=position,
@@ -319,6 +358,16 @@ class RiskManager:
                     reason=reason,
                 )
             ]
+
+        if route.dynamic_reference_migration:
+            self._migrate_reference_break_rules(
+                position=position,
+                bar=bar,
+                route=route,
+                route_context=route_context,
+                proxy_prices=proxy_prices,
+                cross_context_lookup=cross_context_lookup,
+            )
         return []
 
     def _evaluate_atr_dynamic_stop(
@@ -427,6 +476,178 @@ class RiskManager:
             )
         # Cross-symbol triggers liquidate the traded symbol at its own bar price.
         return round(float(bar.close), 6)
+
+    def _update_buy_hold_state(
+        self,
+        *,
+        position: ManagedPosition,
+        route: RouteRule,
+        route_context: RouteBarContext | None,
+        bar_ts: datetime,
+        cross_context_lookup: Callable[[str, datetime], RouteBarContext | None] | None,
+    ) -> None:
+        if position.buy_hold_optimized:
+            return
+        if not self._has_cross_reference_rules(position):
+            return
+        if route_context is None:
+            return
+        if route_context.route.id != route.id:
+            raise RuntimeError(
+                "Route context mismatch while evaluating dynamic reference migration: "
+                f"route_id={route.id}, context_route_id={route_context.route.id}"
+            )
+        if not (route_context.macro_positive and route_context.micro_positive):
+            return
+        if cross_context_lookup is None:
+            raise RuntimeError(
+                "dynamic_reference_migration buy-hold optimization requires "
+                "cross_context_lookup when cross-symbol reference rules are active "
+                f"(signal_id={position.signal_id}, route_id={position.route_id})"
+            )
+        if self._has_positive_cross_context(
+            position=position,
+            bar_ts=bar_ts,
+            cross_context_lookup=cross_context_lookup,
+        ):
+            position.buy_hold_optimized = True
+
+    def _migrate_reference_break_rules(
+        self,
+        *,
+        position: ManagedPosition,
+        bar: BarEvent,
+        route: RouteRule,
+        route_context: RouteBarContext | None,
+        proxy_prices: dict[str, float],
+        cross_context_lookup: Callable[[str, datetime], RouteBarContext | None] | None,
+    ) -> None:
+        has_cross_reference_rules = self._has_cross_reference_rules(position)
+        if has_cross_reference_rules and cross_context_lookup is None:
+            raise RuntimeError(
+                "dynamic_reference_migration requires cross_context_lookup when "
+                "cross-symbol reference rules are active "
+                f"(signal_id={position.signal_id}, route_id={position.route_id})"
+            )
+        if route_context is not None and route_context.route.id != route.id:
+            raise RuntimeError(
+                "Route context mismatch while migrating reference levels: "
+                f"route_id={route.id}, context_route_id={route_context.route.id}"
+            )
+
+        session_date = self._session_date_key(bar.ts)
+        is_new_session = (
+            position.last_reference_session is not None
+            and session_date != position.last_reference_session
+        )
+        position.last_reference_session = session_date
+
+        updated_rules: list[ReferenceBreakRule] = []
+        for reference_break in position.reference_break_rules:
+            candidates: list[float] = []
+            if reference_break.symbol == position.symbol:
+                if position.buy_hold_optimized and has_cross_reference_rules:
+                    updated_rules.append(reference_break)
+                    continue
+                if route_context is not None:
+                    candidates.append(round(float(route_context.key_sma), 6))
+                if is_new_session:
+                    session_level = (
+                        round(float(bar.low), 6)
+                        if reference_break.mode == "below"
+                        else round(float(bar.high), 6)
+                    )
+                    candidates.append(session_level)
+            else:
+                if cross_context_lookup is not None:
+                    cross_context = cross_context_lookup(reference_break.source_route_id, bar.ts)
+                    if (
+                        cross_context is not None
+                        and cross_context.macro_positive
+                        and cross_context.micro_positive
+                    ):
+                        candidates.append(round(float(cross_context.key_sma), 6))
+
+            if not candidates:
+                updated_rules.append(reference_break)
+                continue
+
+            migrated_level = self._migrate_reference_level(
+                level=float(reference_break.level),
+                mode=reference_break.mode,
+                candidates=candidates,
+            )
+            if migrated_level == round(float(reference_break.level), 6):
+                updated_rules.append(reference_break)
+                continue
+            updated_rules.append(replace(reference_break, level=migrated_level))
+
+        position.reference_break_rules = tuple(updated_rules)
+        position.current_reference_price = self._primary_reference_level(
+            reference_break_rules=position.reference_break_rules,
+            symbol=position.symbol,
+        )
+
+    @staticmethod
+    def _migrate_reference_level(
+        *,
+        level: float,
+        mode: Literal["below", "above"],
+        candidates: list[float],
+    ) -> float:
+        if mode == "below":
+            return round(max([level, *candidates]), 6)
+        return round(min([level, *candidates]), 6)
+
+    @staticmethod
+    def _primary_reference_level(
+        *,
+        reference_break_rules: tuple[ReferenceBreakRule, ...],
+        symbol: str,
+    ) -> float | None:
+        for reference_break in reference_break_rules:
+            if reference_break.symbol == symbol:
+                return round(float(reference_break.level), 6)
+        return None
+
+    @staticmethod
+    def _session_date_key(ts: datetime) -> str:
+        ts_utc = pd.Timestamp(ts)
+        if ts_utc.tzinfo is None:
+            ts_utc = ts_utc.tz_localize("UTC")
+        else:
+            ts_utc = ts_utc.tz_convert("UTC")
+        return ts_utc.tz_convert("America/New_York").strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _has_cross_reference_rules(position: ManagedPosition) -> bool:
+        return any(
+            rule.symbol != position.symbol for rule in position.reference_break_rules
+        )
+
+    @staticmethod
+    def _has_positive_cross_context(
+        *,
+        position: ManagedPosition,
+        bar_ts: datetime,
+        cross_context_lookup: Callable[[str, datetime], RouteBarContext | None],
+    ) -> bool:
+        route_ids = sorted(
+            {
+                rule.source_route_id
+                for rule in position.reference_break_rules
+                if rule.symbol != position.symbol
+            }
+        )
+        if not route_ids:
+            return False
+        for route_id in route_ids:
+            context = cross_context_lookup(route_id, bar_ts)
+            if context is None:
+                continue
+            if context.macro_positive and context.micro_positive:
+                return True
+        return False
 
     def _build_reference_break_rules(
         self,

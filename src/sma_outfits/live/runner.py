@@ -507,6 +507,7 @@ class LiveRunner:
                 proxy_prices=self._proxy_prices,
                 route_context=route_context,
                 route_history=history,
+                cross_context_lookup=self._cross_context_lookup,
             )
             position_events.extend(events)
             if not position.closed:
@@ -1140,6 +1141,13 @@ def _position_to_state_row(
             }
             for rule in position.reference_break_rules
         ],
+        "current_reference_price": (
+            float(position.current_reference_price)
+            if position.current_reference_price is not None
+            else None
+        ),
+        "buy_hold_optimized": bool(position.buy_hold_optimized),
+        "last_reference_session": position.last_reference_session,
     }
 
 
@@ -1176,6 +1184,17 @@ def _position_from_state(row: dict[str, Any]) -> ManagedPosition:
         remaining_qty=float(row.get("remaining_qty", 1.0)),
         closed=bool(row.get("closed", False)),
         reference_break_rules=tuple(reference_break_rules),
+        current_reference_price=(
+            float(row["current_reference_price"])
+            if row.get("current_reference_price") is not None
+            else None
+        ),
+        buy_hold_optimized=bool(row.get("buy_hold_optimized", False)),
+        last_reference_session=(
+            str(row["last_reference_session"])
+            if row.get("last_reference_session") is not None
+            else None
+        ),
     )
 
 

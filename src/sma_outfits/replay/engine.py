@@ -266,6 +266,7 @@ class ReplayEngine:
                         proxy_prices=proxy_prices,
                         route_context=work.route_context,
                         route_history=work.history,
+                        cross_context_lookup=_cross_context_lookup,
                     )
                     position_events.extend(events)
                     if not position.closed:

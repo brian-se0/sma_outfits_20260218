@@ -892,6 +892,7 @@ def test_strategy_route_accepts_penny_reference_break_risk_mode(tmp_path: Path) 
                     "macro_gate": "none",
                     "risk_mode": "penny_reference_break",
                     "stop_offset": 0.01,
+                    "dynamic_reference_migration": True,
                 }
             ],
         },
@@ -901,6 +902,7 @@ def test_strategy_route_accepts_penny_reference_break_risk_mode(tmp_path: Path) 
 
     settings = load_settings(config_path=config_path, env_path=env_path)
     assert settings.strategy.routes[0].risk_mode == "penny_reference_break"
+    assert settings.strategy.routes[0].dynamic_reference_migration is True
 
 
 def test_risk_dollar_per_trade_must_be_positive(tmp_path: Path) -> None:
