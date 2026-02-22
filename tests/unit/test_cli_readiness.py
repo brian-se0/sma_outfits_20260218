@@ -92,7 +92,7 @@ def test_discover_range_writes_manifest_and_hash(tmp_path, monkeypatch, capsys) 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["status"] == "ok"
     assert payload["stocks"] == ["SPY"]
-    assert payload["full_range_start"] == "2024-09-04T00:00:00+00:00"
+    assert payload["full_range_start"] == "2024-09-04T13:31:00+00:00"
     assert len(payload["records"]) == 2
     assert all(row["symbol"] == "SPY" for row in payload["records"])
 
@@ -261,7 +261,7 @@ def test_verify_readiness_fails_when_gap_quality_violation_detected(
         {
             "ts": [
                 pd.Timestamp("2025-01-02T14:30:00Z"),
-                pd.Timestamp("2025-01-02T15:30:00Z"),
+                pd.Timestamp("2025-01-08T14:30:00Z"),
             ],
             "open": [100.0, 100.1],
             "high": [100.2, 100.3],
@@ -277,7 +277,7 @@ def test_verify_readiness_fails_when_gap_quality_violation_detected(
         cli.verify_readiness(
             config=Path("configs/settings.example.yaml"),
             start="2025-01-02T14:30:00Z",
-            end="2025-01-02T21:00:00Z",
+            end="2025-01-08T21:00:00Z",
             symbols="",
             timeframes="1m",
             output=Path("ignored.json"),

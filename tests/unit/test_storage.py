@@ -143,6 +143,97 @@ def test_storage_events_root_override_is_used(tmp_path: Path) -> None:
     assert rows == [{"id": "x", "route_id": "r"}]
 
 
+def test_storage_read_bars_honors_start_end_window(tmp_path: Path) -> None:
+    storage = StorageManager(tmp_path / "storage")
+    bars = pd.DataFrame(
+        {
+            "ts": [
+                pd.Timestamp("2025-01-02T14:30:00Z"),
+                pd.Timestamp("2025-01-02T14:31:00Z"),
+                pd.Timestamp("2025-01-02T14:32:00Z"),
+            ],
+            "open": [100.0, 101.0, 102.0],
+            "high": [101.0, 102.0, 103.0],
+            "low": [99.0, 100.0, 101.0],
+            "close": [100.5, 101.5, 102.5],
+            "volume": [1000.0, 1100.0, 1200.0],
+        }
+    )
+    storage.write_bars(bars, symbol="SPY", timeframe="1m")
+
+    out = storage.read_bars(
+        symbol="SPY",
+        timeframe="1m",
+        start=pd.Timestamp("2025-01-02T14:31:00Z"),
+        end=pd.Timestamp("2025-01-02T14:31:00Z"),
+    )
+    assert list(out["ts"]) == [pd.Timestamp("2025-01-02T14:31:00Z")]
+    assert list(out["close"]) == [101.5]
+
+
+def test_storage_load_events_supports_id_and_time_filters(tmp_path: Path) -> None:
+    storage = StorageManager(tmp_path / "storage")
+    storage.append_events(
+        "positions",
+        [
+            {
+                "id": "p1",
+                "signal_id": "s1",
+                "action": "open",
+                "ts": "2025-01-02T14:30:00+00:00",
+            },
+            {
+                "id": "p2",
+                "signal_id": "s1",
+                "action": "close",
+                "ts": "2025-01-02T14:35:00+00:00",
+            },
+            {
+                "id": "p3",
+                "signal_id": "s2",
+                "action": "close",
+                "ts": "2025-01-02T15:35:00+00:00",
+            },
+        ],
+    )
+
+    by_signal = storage.load_events(
+        "positions",
+        id_field="signal_id",
+        allowed_ids={"s2"},
+    )
+    assert [row["id"] for row in by_signal] == ["p3"]
+
+    in_window = storage.load_events(
+        "positions",
+        timestamp_field="ts",
+        start=pd.Timestamp("2025-01-02T14:33:00Z"),
+        end=pd.Timestamp("2025-01-02T14:40:00Z"),
+    )
+    assert [row["id"] for row in in_window] == ["p2"]
+
+
+def test_storage_load_events_supports_or_id_filters(tmp_path: Path) -> None:
+    storage = StorageManager(tmp_path / "storage")
+    storage.append_events(
+        "signals",
+        [
+            {"id": "sig-1", "strike_id": "str-1"},
+            {"id": "sig-2", "strike_id": "str-2"},
+            {"id": "sig-3", "strike_id": "str-3"},
+        ],
+    )
+
+    rows = storage.load_events(
+        "signals",
+        id_filters={
+            "id": {"sig-1"},
+            "strike_id": {"str-3"},
+        },
+    )
+    assert [row["id"] for row in rows] == ["sig-1", "sig-3"]
+
+
 def test_migrate_legacy_layout_detects_ambiguous_case_collision(tmp_path: Path) -> None:
     storage = StorageManager(tmp_path / "storage")
     legacy_dir = (

@@ -155,6 +155,8 @@ class StorageManager:
         if not bases:
             return empty
 
+        start_bound = _as_utc_timestamp(start) if start is not None else None
+        end_bound = _as_utc_timestamp(end) if end is not None else None
         connection = duckdb.connect()
         frames: list[pd.DataFrame] = []
         try:
@@ -163,6 +165,19 @@ class StorageManager:
                 if not parquet_files:
                     continue
                 parquet_glob = str(base / "date=*" / "bars*.parquet")
+                where_clauses: list[str] = []
+                query_params: list[Any] = [parquet_glob]
+                if start_bound is not None:
+                    where_clauses.append("ts >= ?")
+                    query_params.append(start_bound.to_pydatetime())
+                if end_bound is not None:
+                    where_clauses.append("ts <= ?")
+                    query_params.append(end_bound.to_pydatetime())
+                where_sql = (
+                    "  WHERE " + " AND ".join(where_clauses)
+                    if where_clauses
+                    else ""
+                )
                 out = connection.execute(
                     "\n".join(
                         [
@@ -171,12 +186,13 @@ class StorageManager:
                             "  SELECT ts, open, high, low, close, volume,",
                             "         row_number() OVER (PARTITION BY ts ORDER BY filename DESC) AS rn",
                             "  FROM read_parquet(?, filename=true)",
+                            where_sql,
                             ")",
                             "WHERE rn = 1",
                             "ORDER BY ts",
                         ]
                     ),
-                    [parquet_glob],
+                    query_params,
                 ).df()
                 if out.empty:
                     continue
@@ -199,10 +215,6 @@ class StorageManager:
             .drop(columns=["__source_rank"])
             .reset_index(drop=True)
         )
-        if start is not None:
-            out = out.loc[out["ts"] >= _as_utc_timestamp(start)].reset_index(drop=True)
-        if end is not None:
-            out = out.loc[out["ts"] <= _as_utc_timestamp(end)].reset_index(drop=True)
         return out.loc[:, ["ts", "open", "high", "low", "close", "volume"]]
 
     def append_events(self, name: str, records: list[dict[str, Any]]) -> Path:
@@ -213,7 +225,7 @@ class StorageManager:
                 handle.write(b"\n")
         return path
 
-    def load_events(self, name: str) -> list[dict[str, Any]]:
+    def _iter_event_rows(self, name: str) -> list[dict[str, Any]]:
         path = self.events_root / f"{name}.jsonl"
         if not path.exists():
             return []
@@ -222,7 +234,76 @@ class StorageManager:
             for raw in handle:
                 line = raw.strip()
                 if line:
-                    rows.append(orjson.loads(line))
+                    payload = orjson.loads(line)
+                    if not isinstance(payload, dict):
+                        raise RuntimeError(
+                            f"Event file contract violation: expected object rows in {path}"
+                        )
+                    rows.append(payload)
+        return rows
+
+    def load_events(
+        self,
+        name: str,
+        *,
+        id_field: str | None = None,
+        allowed_ids: set[str] | None = None,
+        id_filters: dict[str, set[str]] | None = None,
+        timestamp_field: str | None = None,
+        start: pd.Timestamp | None = None,
+        end: pd.Timestamp | None = None,
+    ) -> list[dict[str, Any]]:
+        if id_filters is not None and (allowed_ids is not None or id_field is not None):
+            raise ValueError("id_filters cannot be combined with id_field/allowed_ids")
+        if allowed_ids is not None and id_field is None:
+            raise ValueError("id_field is required when allowed_ids is provided")
+        if (start is not None or end is not None) and timestamp_field is None:
+            raise ValueError("timestamp_field is required when start/end filters are provided")
+
+        start_ts = _as_utc_timestamp(start) if start is not None else None
+        end_ts = _as_utc_timestamp(end) if end is not None else None
+        selected_ids = {str(value) for value in allowed_ids} if allowed_ids is not None else None
+        selected_filter_ids = (
+            {
+                field: {str(value) for value in values}
+                for field, values in id_filters.items()
+                if values
+            }
+            if id_filters is not None
+            else None
+        )
+        rows: list[dict[str, Any]] = []
+        for row in self._iter_event_rows(name):
+            if selected_filter_ids is not None:
+                matched_any_filter = False
+                for filter_field, allowed in selected_filter_ids.items():
+                    if filter_field not in row:
+                        raise RuntimeError(
+                            f"Event file contract violation: '{filter_field}' missing in {name}.jsonl row"
+                        )
+                    if str(row[filter_field]) in allowed:
+                        matched_any_filter = True
+                        break
+                if not matched_any_filter:
+                    continue
+            elif selected_ids is not None:
+                if id_field not in row:
+                    raise RuntimeError(
+                        f"Event file contract violation: '{id_field}' missing in {name}.jsonl row"
+                    )
+                if str(row[id_field]) not in selected_ids:
+                    continue
+            if timestamp_field is not None:
+                if timestamp_field not in row:
+                    raise RuntimeError(
+                        f"Event file contract violation: '{timestamp_field}' missing in {name}.jsonl row"
+                    )
+                ts = _coerce_event_timestamp(row[timestamp_field], field=timestamp_field, name=name)
+                if start_ts is not None and ts < start_ts:
+                    continue
+                if end_ts is not None and ts > end_ts:
+                    continue
+            rows.append(row)
         return rows
 
     def migrate_legacy_timeframe_layout(self, *, dry_run: bool = True) -> dict[str, Any]:
@@ -311,6 +392,17 @@ def _move_tree_with_merge(source: Path, target: Path) -> int:
     except OSError:
         pass
     return files_moved
+
+
+def _coerce_event_timestamp(value: Any, *, field: str, name: str) -> pd.Timestamp:
+    try:
+        ts = pd.Timestamp(value)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "Event file contract violation: invalid timestamp value for "
+            f"'{field}' in {name}.jsonl: {value!r}"
+        ) from exc
+    return _as_utc_timestamp(ts)
 
 
 def _as_utc_timestamp(value: pd.Timestamp) -> pd.Timestamp:

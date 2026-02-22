@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import heapq
 from pathlib import Path
 from typing import Callable
 
@@ -149,14 +150,14 @@ class ReplayEngine:
                 bar_ts=ts,
             )
 
+        batch_heap = self._initialize_batch_heap(
+            bars_by_pair=bars_by_pair,
+            pointers=pointers,
+        )
         processed_bars = 0
-        while True:
-            next_ts = self._next_batch_timestamp(bars_by_pair=bars_by_pair, pointers=pointers)
-            if next_ts is None:
-                break
-
-            batch_rows = self._consume_timestamp_batch(
-                ts=next_ts,
+        while batch_heap:
+            _, batch_rows = self._consume_heap_batch(
+                batch_heap=batch_heap,
                 bars_by_pair=bars_by_pair,
                 pointers=pointers,
             )
@@ -315,40 +316,46 @@ class ReplayEngine:
         )
 
     @staticmethod
-    def _next_batch_timestamp(
+    def _initialize_batch_heap(
         *,
         bars_by_pair: dict[tuple[str, str], pd.DataFrame],
         pointers: dict[tuple[str, str], int],
-    ) -> pd.Timestamp | None:
-        next_ts: pd.Timestamp | None = None
-        for key, bars in bars_by_pair.items():
-            pointer = pointers[key]
-            if pointer >= len(bars):
-                continue
-            candidate = to_utc_timestamp(bars.iloc[pointer]["ts"])
-            if next_ts is None or candidate < next_ts:
-                next_ts = candidate
-        return next_ts
-
-    @staticmethod
-    def _consume_timestamp_batch(
-        *,
-        ts: pd.Timestamp,
-        bars_by_pair: dict[tuple[str, str], pd.DataFrame],
-        pointers: dict[tuple[str, str], int],
-    ) -> list[tuple[tuple[str, str], pd.Series]]:
-        batch_rows: list[tuple[tuple[str, str], pd.Series]] = []
+    ) -> list[tuple[pd.Timestamp, tuple[str, str]]]:
+        heap: list[tuple[pd.Timestamp, tuple[str, str]]] = []
         for key in sorted(bars_by_pair.keys()):
             bars = bars_by_pair[key]
             pointer = pointers[key]
             if pointer >= len(bars):
                 continue
             candidate_ts = to_utc_timestamp(bars.iloc[pointer]["ts"])
-            if candidate_ts != ts:
+            heapq.heappush(heap, (candidate_ts, key))
+        return heap
+
+    @staticmethod
+    def _consume_heap_batch(
+        *,
+        batch_heap: list[tuple[pd.Timestamp, tuple[str, str]]],
+        bars_by_pair: dict[tuple[str, str], pd.DataFrame],
+        pointers: dict[tuple[str, str], int],
+    ) -> tuple[pd.Timestamp, list[tuple[tuple[str, str], pd.Series]]]:
+        next_ts = batch_heap[0][0]
+        batch_rows: list[tuple[tuple[str, str], pd.Series]] = []
+        while batch_heap and batch_heap[0][0] == next_ts:
+            _ts, key = heapq.heappop(batch_heap)
+            bars = bars_by_pair[key]
+            pointer = pointers[key]
+            if pointer >= len(bars):
+                continue
+            current_ts = to_utc_timestamp(bars.iloc[pointer]["ts"])
+            if current_ts != next_ts:
                 continue
             batch_rows.append((key, bars.iloc[pointer]))
             pointers[key] = pointer + 1
-        return batch_rows
+            next_pointer = pointers[key]
+            if next_pointer < len(bars):
+                following_ts = to_utc_timestamp(bars.iloc[next_pointer]["ts"])
+                heapq.heappush(batch_heap, (following_ts, key))
+        return next_ts, batch_rows
 
     @staticmethod
     def _lookup_cross_context(

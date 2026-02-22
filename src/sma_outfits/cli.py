@@ -242,22 +242,30 @@ def _gap_quality_metrics(
     ):
         timezone = settings.sessions.timezone
         local = ts.dt.tz_convert(timezone)
-        expected = float(_INTRADAY_TIMEFRAME_MINUTES[timeframe])
-        threshold = expected * 1.5
-        unexpected_count = 0
-        max_gap_minutes: float | None = None
-        grouped = pd.DataFrame({"local_ts": local}).groupby(
-            local.dt.strftime("%Y-%m-%d"),
-            sort=True,
+        deltas = local.diff().dropna()
+        max_gap_minutes = (
+            float((deltas.dt.total_seconds() / 60.0).max()) if not deltas.empty else None
         )
-        for _day, rows in grouped:
-            diffs = rows["local_ts"].diff().dropna().dt.total_seconds() / 60.0
-            if diffs.empty:
+        # Alpaca/IEX trade bars are sparse for many symbols intraday, so
+        # within-session minute continuity is not a reliable quality signal.
+        # For regular-session readiness, treat missing business sessions as
+        # the gap-quality failure mode and tolerate one business-day miss for
+        # exchange holidays.
+        local_dates = local.dt.normalize().drop_duplicates().reset_index(drop=True)
+        unexpected_missing_business_days = 0
+        for index in range(1, len(local_dates)):
+            previous = pd.Timestamp(local_dates.iloc[index - 1])
+            current = pd.Timestamp(local_dates.iloc[index])
+            if current <= previous:
                 continue
-            day_max = float(diffs.max())
-            max_gap_minutes = day_max if max_gap_minutes is None else max(max_gap_minutes, day_max)
-            unexpected_count += int((diffs > threshold).sum())
-        return unexpected_count, max_gap_minutes
+            start = previous + pd.Timedelta(days=1)
+            end = current - pd.Timedelta(days=1)
+            if start > end:
+                continue
+            missing_business_days = len(pd.bdate_range(start, end))
+            if missing_business_days > 1:
+                unexpected_missing_business_days += missing_business_days - 1
+        return unexpected_missing_business_days, max_gap_minutes
 
     deltas = ts.diff().dropna()
     if deltas.empty:
@@ -369,6 +377,94 @@ def _write_coverage_artifacts(
     return csv_path, json_path
 
 
+def _require_event_key(row: dict[str, object], *, event: str, key: str) -> str:
+    if key not in row:
+        raise RuntimeError(
+            "Event file contract violation: "
+            f"'{key}' missing in {event}.jsonl row"
+        )
+    value = row[key]
+    if value is None:
+        raise RuntimeError(
+            "Event file contract violation: "
+            f"'{key}' cannot be null in {event}.jsonl row"
+        )
+    return str(value)
+
+
+def _load_summary_event_rows(
+    *,
+    storage: StorageManager,
+    start: pd.Timestamp | None,
+    end: pd.Timestamp | None,
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    if start is None or end is None:
+        return (
+            storage.load_events("strikes"),
+            storage.load_events("signals"),
+            storage.load_events("positions"),
+        )
+
+    strikes_all = storage.load_events("strikes")
+    positions_all = storage.load_events("positions")
+
+    strike_ids_in_window: set[str] = set()
+    for row in strikes_all:
+        bar_ts = ensure_utc_timestamp(
+            _require_event_key(row, event="strikes", key="bar_ts")
+        )
+        if start <= bar_ts <= end:
+            strike_ids_in_window.add(_require_event_key(row, event="strikes", key="id"))
+
+    close_signal_ids_in_window: set[str] = set()
+    for row in positions_all:
+        action = _require_event_key(row, event="positions", key="action")
+        if action != "close":
+            continue
+        close_ts = ensure_utc_timestamp(
+            _require_event_key(row, event="positions", key="ts")
+        )
+        if start <= close_ts <= end:
+            close_signal_ids_in_window.add(
+                _require_event_key(row, event="positions", key="signal_id")
+            )
+
+    signal_filters: dict[str, set[str]] = {}
+    if strike_ids_in_window:
+        signal_filters["strike_id"] = strike_ids_in_window
+    if close_signal_ids_in_window:
+        signal_filters["id"] = close_signal_ids_in_window
+
+    selected_signals = (
+        storage.load_events("signals", id_filters=signal_filters)
+        if signal_filters
+        else []
+    )
+    selected_signal_ids = {
+        _require_event_key(row, event="signals", key="id")
+        for row in selected_signals
+    }
+    selected_strike_ids = strike_ids_in_window.union(
+        {
+            _require_event_key(row, event="signals", key="strike_id")
+            for row in selected_signals
+        }
+    )
+
+    selected_strikes = [
+        row
+        for row in strikes_all
+        if _require_event_key(row, event="strikes", key="id") in selected_strike_ids
+    ]
+    selected_positions = [
+        row
+        for row in positions_all
+        if _require_event_key(row, event="positions", key="signal_id")
+        in selected_signal_ids
+    ]
+    return selected_strikes, selected_signals, selected_positions
+
+
 @app.command("validate-config")
 def validate_config(
     config: Path = typer.Option(
@@ -478,7 +574,10 @@ def discover_range(
     )
     if not sorted_records:
         raise RuntimeError("discover-range found no stock discovery records")
-    full_range_start = min(
+    # Readiness coverage checks require a start that is valid for every pair.
+    # Use the latest discovered earliest timestamp across all pairs so no
+    # pair is forced before its own available history boundary.
+    full_range_start = max(
         ensure_utc_timestamp(row["earliest_ts"]) for row in sorted_records
     ).isoformat()
     payload: dict[str, object] = {
@@ -932,9 +1031,11 @@ def verify_readiness(
                 + f" at {run_manifest_path}"
             )
 
-    strikes = storage.load_events("strikes")
-    signals = storage.load_events("signals")
-    positions = storage.load_events("positions")
+    strikes, signals, positions = _load_summary_event_rows(
+        storage=storage,
+        start=start_ts,
+        end=end_ts,
+    )
     summary = build_summary_from_records(
         strike_rows=strikes,
         signal_rows=signals,
@@ -1014,11 +1115,12 @@ def report(
     assert_python_runtime()
     settings = _load_runtime_settings(config)
     storage = _new_storage_manager(settings)
-    strikes = storage.load_events("strikes")
-    signals = storage.load_events("signals")
-    positions = storage.load_events("positions")
-
     start_ts, end_ts = _resolve_report_range(date, range_)
+    strikes, signals, positions = _load_summary_event_rows(
+        storage=storage,
+        start=start_ts,
+        end=end_ts,
+    )
     summary = build_summary_from_records(
         strike_rows=strikes,
         signal_rows=signals,

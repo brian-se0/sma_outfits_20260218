@@ -2,6 +2,7 @@ VENV := .venv
 PYTHON := $(VENV)\Scripts\python.exe
 PIP := $(PYTHON) -m pip
 INSTALL_STAMP := $(VENV)\.install.stamp
+INSTALL_DEPS := pyproject.toml
 
 CONFIG ?= configs/settings.example.yaml
 
@@ -114,6 +115,10 @@ START ?= $(PROFILE_START)
 END ?= $(PROFILE_END)
 SYMBOLS ?= $(PROFILE_SYMBOLS)
 TIMEFRAMES ?= $(PROFILE_TIMEFRAMES)
+BACKFILL_SYMBOLS ?= $(SYMBOLS)
+BACKFILL_TIMEFRAMES ?= $(TIMEFRAMES)
+REPLAY_SYMBOLS ?= $(SYMBOLS)
+REPLAY_TIMEFRAMES ?= $(TIMEFRAMES)
 
 # e2e warmup + reporting window controls:
 # - Analysis window is what report summarizes.
@@ -130,10 +135,12 @@ DEFAULT_REPORT_RANGE := $(ANALYSIS_START),$(ANALYSIS_END)
 REPORT_RANGE ?=
 REPORT_RANGE_FOR_E2E := $(if $(strip $(REPORT_RANGE)),$(REPORT_RANGE),$(DEFAULT_REPORT_RANGE))
 
-BACKFILL_SYMBOLS_ARG := $(if $(strip $(SYMBOLS)),--symbols $(SYMBOLS),)
-BACKFILL_TIMEFRAMES_ARG := $(if $(strip $(TIMEFRAMES)),--timeframes $(TIMEFRAMES),)
-REPLAY_SYMBOLS_ARG := $(if $(strip $(SYMBOLS)),--symbols $(SYMBOLS),)
-REPLAY_TIMEFRAMES_ARG := $(if $(strip $(TIMEFRAMES)),--timeframes $(TIMEFRAMES),)
+SYMBOLS_ARG := $(if $(strip $(SYMBOLS)),--symbols $(SYMBOLS),)
+TIMEFRAMES_ARG := $(if $(strip $(TIMEFRAMES)),--timeframes $(TIMEFRAMES),)
+BACKFILL_SYMBOLS_ARG := $(if $(strip $(BACKFILL_SYMBOLS)),--symbols $(BACKFILL_SYMBOLS),)
+BACKFILL_TIMEFRAMES_ARG := $(if $(strip $(BACKFILL_TIMEFRAMES)),--timeframes $(BACKFILL_TIMEFRAMES),)
+REPLAY_SYMBOLS_ARG := $(if $(strip $(REPLAY_SYMBOLS)),--symbols $(REPLAY_SYMBOLS),)
+REPLAY_TIMEFRAMES_ARG := $(if $(strip $(REPLAY_TIMEFRAMES)),--timeframes $(REPLAY_TIMEFRAMES),)
 REPORT_RANGE_ARG := $(if $(strip $(REPORT_RANGE)),--range $(REPORT_RANGE),)
 E2E_REPORT_RANGE_ARG := $(if $(strip $(REPORT_RANGE_FOR_E2E)),--range $(REPORT_RANGE_FOR_E2E),)
 RUN_MANIFEST_SYMBOLS_ARG := $(if $(strip $(SYMBOLS)),--symbols $(SYMBOLS),)
@@ -142,14 +149,14 @@ RUN_MANIFEST_TIMEFRAMES_ARG := $(if $(strip $(TIMEFRAMES)),--timeframes $(TIMEFR
 .PHONY: help venv install validate-config discover-range verify-readiness test dead-code-check backfill replay run-live report migrate-storage-layout preflight-storage e2e clean clean-all
 
 help:
-	powershell -NoProfile -Command "Write-Output 'Targets:'; Write-Output '  make validate-config'; Write-Output '  make discover-range'; Write-Output '  make verify-readiness'; Write-Output '  make test'; Write-Output '  make dead-code-check'; Write-Output '  make backfill'; Write-Output '  make replay'; Write-Output '  make run-live'; Write-Output '  make report'; Write-Output '  make migrate-storage-layout'; Write-Output '  make e2e'; Write-Output '  make clean'; Write-Output '  make clean-all'; Write-Output ''; Write-Output 'Common variables:'; Write-Output '  CONFIG=...'; Write-Output '  PROFILE=smoke|day|week|month|max|custom'; Write-Output '  UNIVERSE=core|core_expanded|all_stocks|all'; Write-Output '  START=... END=... (required when PROFILE=custom)'; Write-Output '  SYMBOLS=CSV'; Write-Output '  TIMEFRAMES=CSV'; Write-Output '  STAGES=validate-config,backfill,replay,report'; Write-Output '  FEATURES=cross_symbol_context (rejected; not a runtime flag, use config route.cross_symbol_context)'; Write-Output '  DISCOVER_RANGE_OUTPUT=...'; Write-Output '  FULL_RANGE_START=... READINESS_END=...'; Write-Output '  ANALYSIS_START=... ANALYSIS_END=... WARMUP_DAYS=...'; Write-Output '  REPORT_RANGE=start,end'; Write-Output ''; Write-Output 'Examples:'; Write-Output '  make discover-range CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml UNIVERSE=all_stocks TIMEFRAME_SET=all'; Write-Output '  make migrate-storage-layout CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml'; Write-Output '  make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all STAGES=validate-config,backfill'; Write-Output '  make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all TIMEFRAME_SET=all STAGES=replay,report'; Write-Output '  make verify-readiness CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all'"
+	powershell -NoProfile -Command "Write-Output 'Targets:'; Write-Output '  make validate-config'; Write-Output '  make discover-range'; Write-Output '  make verify-readiness'; Write-Output '  make test'; Write-Output '  make dead-code-check'; Write-Output '  make backfill'; Write-Output '  make replay'; Write-Output '  make run-live'; Write-Output '  make report'; Write-Output '  make migrate-storage-layout'; Write-Output '  make e2e'; Write-Output '  make clean'; Write-Output '  make clean-all'; Write-Output ''; Write-Output 'Common variables:'; Write-Output '  CONFIG=...'; Write-Output '  PROFILE=smoke|day|week|month|max|custom'; Write-Output '  UNIVERSE=core|core_expanded|all_stocks|all'; Write-Output '  START=... END=... (required when PROFILE=custom)'; Write-Output '  SYMBOLS=CSV'; Write-Output '  TIMEFRAMES=CSV'; Write-Output '  BACKFILL_SYMBOLS=CSV (defaults to SYMBOLS)'; Write-Output '  BACKFILL_TIMEFRAMES=CSV (defaults to TIMEFRAMES)'; Write-Output '  REPLAY_SYMBOLS=CSV (defaults to SYMBOLS)'; Write-Output '  REPLAY_TIMEFRAMES=CSV (defaults to TIMEFRAMES)'; Write-Output '  STAGES=validate-config,backfill,replay,report'; Write-Output '  FEATURES=cross_symbol_context (rejected; not a runtime flag, use config route.cross_symbol_context)'; Write-Output '  DISCOVER_RANGE_OUTPUT=...'; Write-Output '  FULL_RANGE_START=... READINESS_END=...'; Write-Output '  ANALYSIS_START=... ANALYSIS_END=... WARMUP_DAYS=...'; Write-Output '  REPORT_RANGE=start,end'; Write-Output ''; Write-Output 'Examples:'; Write-Output '  make discover-range CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml UNIVERSE=all_stocks TIMEFRAME_SET=all'; Write-Output '  make migrate-storage-layout CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml'; Write-Output '  make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all STAGES=validate-config,backfill'; Write-Output '  make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all REPLAY_SYMBOLS= REPLAY_TIMEFRAMES= STAGES=validate-config,backfill,replay,report'; Write-Output '  make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all TIMEFRAME_SET=all STAGES=replay,report'; Write-Output '  make verify-readiness CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all'"
 
 venv:
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; if (!(Test-Path '$(PYTHON)')) { py -3.14 -m venv $(VENV) }; if (!(Test-Path '$(VENV)\\Scripts\\pip.exe')) { & '$(PYTHON)' -m ensurepip --upgrade --default-pip }"
 	$(PYTHON) -c "import sys; assert sys.version_info[:3] == (3, 14, 3), f'Python 3.14.3 required, got {sys.version.split()[0]}'"
 
-$(INSTALL_STAMP): pyproject.toml Makefile | venv
-	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; & '$(PYTHON)' -m pip install --upgrade pip; & '$(PYTHON)' -m pip install -e .[dev]"
+$(INSTALL_STAMP): $(INSTALL_DEPS) | venv
+	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; & '$(PYTHON)' -m pip install -e .[dev]"
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(VENV)' | Out-Null; Set-Content -Path '$(INSTALL_STAMP)' -Value (Get-Date -Format o)"
 
 install: $(INSTALL_STAMP)
@@ -158,10 +165,10 @@ validate-config: install
 	$(PYTHON) -m sma_outfits.cli validate-config --config $(CONFIG)
 
 discover-range: install
-	$(PYTHON) -m sma_outfits.cli discover-range --config $(CONFIG) $(BACKFILL_SYMBOLS_ARG) $(BACKFILL_TIMEFRAMES_ARG) --output $(DISCOVER_RANGE_OUTPUT) --start $(DISCOVER_START) --end $(READINESS_END)
+	$(PYTHON) -m sma_outfits.cli discover-range --config $(CONFIG) $(SYMBOLS_ARG) $(TIMEFRAMES_ARG) --output $(DISCOVER_RANGE_OUTPUT) --start $(DISCOVER_START) --end $(READINESS_END)
 
 verify-readiness: install
-	$(PYTHON) -m sma_outfits.cli verify-readiness --config $(CONFIG) --start $(START) --end $(END) $(BACKFILL_SYMBOLS_ARG) $(BACKFILL_TIMEFRAMES_ARG) --output $(READINESS_ACCEPTANCE_OUTPUT)
+	$(PYTHON) -m sma_outfits.cli verify-readiness --config $(CONFIG) --start $(START) --end $(END) $(SYMBOLS_ARG) $(TIMEFRAMES_ARG) --output $(READINESS_ACCEPTANCE_OUTPUT)
 
 test: install
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp\\pytest' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; & '$(PYTHON)' -m pytest"
@@ -188,7 +195,7 @@ preflight-storage:
 	powershell -NoProfile -Command "$$profile='$(PROFILE)'; $$largeProfiles=@('week','month','max','custom'); if (-not ($$largeProfiles -contains $$profile)) { Write-Output ('storage preflight: skipped for PROFILE=' + $$profile); exit 0 }; $$targetPath = [System.IO.Path]::GetFullPath('$(CURDIR)'); $$root = [System.IO.Path]::GetPathRoot($$targetPath); if ([string]::IsNullOrWhiteSpace($$root)) { throw ('Unable to resolve path root for ' + $$targetPath) }; $$driveInfo = [System.IO.DriveInfo]::new($$root); $$freeBytes = [int64]$$driveInfo.AvailableFreeSpace; $$thresholdGb = [double]'$(MIN_FREE_GB)'; $$thresholdBytes = [int64]($$thresholdGb * 1GB); if ($$freeBytes -lt $$thresholdBytes) { throw ('Insufficient free disk space for PROFILE=' + $$profile + ': free=' + $$freeBytes + ' bytes, required>=' + $$thresholdBytes + ' bytes (MIN_FREE_GB=' + $$thresholdGb + ')') }; Write-Output ('storage preflight: ok PROFILE=' + $$profile + ' free_bytes=' + $$freeBytes + ' threshold_bytes=' + $$thresholdBytes + ' root=' + $$root)"
 
 e2e: preflight-storage
-	powershell -NoProfile -Command "Write-Output ('e2e config: profile=$(PROFILE) stages=$(STAGES_NORMALIZED) symbols=$(SYMBOLS) timeframes=$(TIMEFRAMES) analysis_start=$(ANALYSIS_START) analysis_end=$(ANALYSIS_END) warmup_days=$(WARMUP_DAYS) warmup_start=$(WARMUP_START) backfill_start=$(BACKFILL_START) backfill_end=$(BACKFILL_END) replay_start=$(REPLAY_START) replay_end=$(REPLAY_END) report_range=$(REPORT_RANGE_FOR_E2E)')"
+	powershell -NoProfile -Command "Write-Output ('e2e config: profile=$(PROFILE) stages=$(STAGES_NORMALIZED) symbols=$(SYMBOLS) timeframes=$(TIMEFRAMES) backfill_symbols=$(BACKFILL_SYMBOLS) backfill_timeframes=$(BACKFILL_TIMEFRAMES) replay_symbols=$(REPLAY_SYMBOLS) replay_timeframes=$(REPLAY_TIMEFRAMES) analysis_start=$(ANALYSIS_START) analysis_end=$(ANALYSIS_END) warmup_days=$(WARMUP_DAYS) warmup_start=$(WARMUP_START) backfill_start=$(BACKFILL_START) backfill_end=$(BACKFILL_END) replay_start=$(REPLAY_START) replay_end=$(REPLAY_END) report_range=$(REPORT_RANGE_FOR_E2E)')"
 	$(if $(call has_stage,validate-config),$(PYTHON) -m sma_outfits.cli validate-config --config $(CONFIG),powershell -NoProfile -Command "Write-Output 'e2e skip: validate-config'")
 	$(if $(call has_stage,backfill),$(PYTHON) -m sma_outfits.cli backfill --config $(CONFIG) $(BACKFILL_SYMBOLS_ARG) --start $(BACKFILL_START) --end $(BACKFILL_END) $(BACKFILL_TIMEFRAMES_ARG),powershell -NoProfile -Command "Write-Output 'e2e skip: backfill'")
 	$(if $(call has_stage,replay),$(PYTHON) -m sma_outfits.cli replay --config $(CONFIG) --start $(REPLAY_START) --end $(REPLAY_END) $(REPLAY_SYMBOLS_ARG) $(REPLAY_TIMEFRAMES_ARG),powershell -NoProfile -Command "Write-Output 'e2e skip: replay'")
@@ -197,7 +204,7 @@ e2e: preflight-storage
 	powershell -NoProfile -Command "Write-Output 'e2e complete'"
 
 clean:
-	powershell -NoProfile -Command "$$targets = @('artifacts', '.tmp', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'htmlcov', 'build', 'dist'); foreach ($$t in $$targets) { if (Test-Path $$t) { Remove-Item -Recurse -Force $$t } }; Get-ChildItem -Path . -Recurse -Directory -Filter '__pycache__' | Where-Object { $$_.FullName -notlike '*\.venv\*' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem -Path . -Recurse -File -Include '*.pyc','*.pyo' | Where-Object { $$_.FullName -notlike '*\.venv\*' } | Remove-Item -Force -ErrorAction SilentlyContinue; Get-ChildItem -Path . -Directory -Filter '*.egg-info' | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue"
+	powershell -NoProfile -Command "$$targets = @('artifacts', '.tmp', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'htmlcov', 'build', 'dist'); foreach ($$t in $$targets) { if (Test-Path -LiteralPath $$t) { cmd /d /c ('rmdir /s /q ""{0}""' -f $$t) | Out-Null; if (Test-Path -LiteralPath $$t) { throw ('Failed to remove ' + $$t) } } }; $$scanRoots = @(Get-ChildItem -Path . -Directory -Force | Where-Object { $$_.Name -notin @('.venv', '.git') } | ForEach-Object { $$_.FullName }); if ($$scanRoots.Count -gt 0) { Get-ChildItem -Path $$scanRoots -Recurse -Directory -Filter '__pycache__' -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem -Path $$scanRoots -Recurse -File -Include '*.pyc','*.pyo' -Force -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue }; Get-ChildItem -Path . -Directory -Filter '*.egg-info' -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem -Path . -File -Include '*.pyc','*.pyo' -Force -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue"
 
 clean-all: clean
 	powershell -NoProfile -Command "if (Test-Path '$(VENV)') { Remove-Item -Recurse -Force '$(VENV)' }"
