@@ -335,3 +335,17 @@ def test_write_summary_report_both_mode_adds_close_columns_and_sections(tmp_path
     markdown = markdown_path.read_text(encoding="utf-8")
     assert "Strike-Time Attribution" in markdown
     assert "Close-Time Attribution" in markdown
+    assert "Academic Validation Appendix" in markdown
+    assert "Walk-Forward Optimization (WFO)" in markdown
+    assert "Bootstrap Distribution" in markdown
+    assert "P-Value and Multiple-Testing Summary" in markdown
+    assert "Execution Realism Sensitivity" in markdown
+    assert "Regime Stability" in markdown
+    assert "Citation Pack" in markdown
+    assert "white_2000_reality_check" in markdown
+
+    assert (tmp_path / "range_test_academic_validation.json").exists()
+    assert (tmp_path / "range_test_wfo_table.csv").exists()
+    assert (tmp_path / "range_test_pvalues.csv").exists()
+    assert (tmp_path / "range_test_bootstrap_bins.csv").exists()
+    assert (tmp_path / "figures" / "range_test_bootstrap_hist.png").exists()

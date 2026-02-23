@@ -928,3 +928,67 @@ def test_risk_dollar_per_trade_must_be_positive(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="risk.risk_dollar_per_trade must be > 0"):
         load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_execution_cost_scenario_lengths_must_match(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "execution_costs": {
+                    "slippage_bps_scenarios": [2.0, 3.5, 5.0],
+                    "commission_bps_scenarios": [0.5, 0.75],
+                    "latency_bars_scenarios": [0, 1, 1],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="commission_bps_scenarios length must match"):
+        load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_missing_citation_pack_path_rejected(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "citations": {
+                    "pack_path": str(tmp_path / "missing_citations.yaml"),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(FileNotFoundError, match="Citations pack not found"):
+        load_settings(config_path=config_path, env_path=env_path)

@@ -134,6 +134,17 @@ DEFAULT_STRATEGY_ROUTES = [
     },
 ]
 
+DEFAULT_VALIDATION_SCOPE_SYMBOLS = ["QQQ", "SPY", "TQQQ", "SQQQ", "SVIX", "VIXY"]
+DEFAULT_EXECUTION_SLIPPAGE_BPS_SCENARIOS = [2.0, 3.5, 5.0]
+DEFAULT_EXECUTION_COMMISSION_BPS_SCENARIOS = [0.5, 0.75, 1.0]
+DEFAULT_EXECUTION_LATENCY_BARS_SCENARIOS = [0, 1, 1]
+DEFAULT_CITATIONS_PACK_PATH = (
+    "src/sma_outfits/reporting/citations/academic_validation.yaml"
+)
+DEFAULT_AUTHOR_ALIGNMENT_RULES_PATH = (
+    "src/sma_outfits/reporting/citations/author_alignment_rules.yaml"
+)
+
 REQUIRED_ENV_KEYS = (
     "ALPACA_API_KEY",
     "ALPACA_SECRET_KEY",
@@ -564,6 +575,214 @@ class RiskConfig(BaseModel):
         return value
 
 
+class ValidationWFOConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    train_months: int = 24
+    test_months: int = 6
+    step_months: int = 6
+    min_folds: int = 5
+    min_closed_trades_per_fold: int = 50
+
+    @field_validator(
+        "train_months",
+        "test_months",
+        "step_months",
+        "min_folds",
+        "min_closed_trades_per_fold",
+    )
+    @classmethod
+    def _positive_integers(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("validation.wfo values must be > 0")
+        return value
+
+
+class ValidationThresholdsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    oos_sharpe_min: float = 1.5
+    oos_calmar_min: float = 2.0
+    bootstrap_pvalue_max: float = 0.05
+    fdr_qvalue_max: float = 0.05
+    replication_score_min: float = 0.8
+
+    @field_validator("oos_sharpe_min", "oos_calmar_min")
+    @classmethod
+    def _non_negative_thresholds(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError("validation.thresholds values must be >= 0")
+        return value
+
+    @field_validator("bootstrap_pvalue_max", "fdr_qvalue_max", "replication_score_min")
+    @classmethod
+    def _zero_one_range(cls, value: float) -> float:
+        if value <= 0 or value > 1:
+            raise ValueError("validation.thresholds probability values must be within (0, 1]")
+        return value
+
+
+class ValidationBootstrapConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["stationary_block"] = "stationary_block"
+    samples: int = 10000
+    alpha: float = 0.05
+
+    @field_validator("samples")
+    @classmethod
+    def _positive_samples(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("validation.bootstrap.samples must be > 0")
+        return value
+
+    @field_validator("alpha")
+    @classmethod
+    def _alpha_range(cls, value: float) -> float:
+        if value <= 0 or value >= 1:
+            raise ValueError("validation.bootstrap.alpha must be within (0, 1)")
+        return value
+
+
+class ValidationMultipleTestingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["fdr_bh"] = "fdr_bh"
+
+
+class ValidationRegimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proxy_symbol: str = "VIXY"
+    require_positive_mean_in_each: bool = True
+
+    @field_validator("proxy_symbol")
+    @classmethod
+    def _normalize_proxy_symbol(cls, value: str) -> str:
+        candidate = value.strip().upper()
+        if not candidate:
+            raise ValueError("validation.regime.proxy_symbol must be non-empty")
+        return candidate
+
+
+class ValidationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope_symbols: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_VALIDATION_SCOPE_SYMBOLS)
+    )
+    wfo: ValidationWFOConfig = Field(default_factory=ValidationWFOConfig)
+    thresholds: ValidationThresholdsConfig = Field(default_factory=ValidationThresholdsConfig)
+    bootstrap: ValidationBootstrapConfig = Field(default_factory=ValidationBootstrapConfig)
+    multiple_testing: ValidationMultipleTestingConfig = Field(
+        default_factory=ValidationMultipleTestingConfig
+    )
+    regime: ValidationRegimeConfig = Field(default_factory=ValidationRegimeConfig)
+    random_strategy_mc_samples: int = 10000
+    seed: int = 42
+    author_alignment_rules_path: str = DEFAULT_AUTHOR_ALIGNMENT_RULES_PATH
+
+    @field_validator("scope_symbols")
+    @classmethod
+    def _validate_scope_symbols(cls, values: list[str]) -> list[str]:
+        if not values:
+            raise ValueError("validation.scope_symbols must be non-empty")
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            symbol = value.strip().upper()
+            if not symbol:
+                raise ValueError("validation.scope_symbols cannot include empty values")
+            if symbol in seen:
+                raise ValueError(f"validation.scope_symbols duplicate symbol '{symbol}'")
+            seen.add(symbol)
+            normalized.append(symbol)
+        return normalized
+
+    @field_validator("random_strategy_mc_samples")
+    @classmethod
+    def _positive_mc_samples(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("validation.random_strategy_mc_samples must be > 0")
+        return value
+
+    @field_validator("author_alignment_rules_path")
+    @classmethod
+    def _non_empty_alignment_path(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("validation.author_alignment_rules_path must be non-empty")
+        return candidate
+
+
+class ExecutionCostsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slippage_bps_scenarios: list[float] = Field(
+        default_factory=lambda: list(DEFAULT_EXECUTION_SLIPPAGE_BPS_SCENARIOS)
+    )
+    commission_bps_scenarios: list[float] = Field(
+        default_factory=lambda: list(DEFAULT_EXECUTION_COMMISSION_BPS_SCENARIOS)
+    )
+    latency_bars_scenarios: list[int] = Field(
+        default_factory=lambda: list(DEFAULT_EXECUTION_LATENCY_BARS_SCENARIOS)
+    )
+    partial_fill_round_lot: bool = True
+
+    @field_validator("slippage_bps_scenarios", "commission_bps_scenarios")
+    @classmethod
+    def _validate_bps_series(cls, values: list[float], info: ValidationInfo) -> list[float]:
+        if not values:
+            raise ValueError(f"execution_costs.{info.field_name} must be non-empty")
+        output: list[float] = []
+        for value in values:
+            if value < 0:
+                raise ValueError(f"execution_costs.{info.field_name} values must be >= 0")
+            output.append(float(value))
+        return output
+
+    @field_validator("latency_bars_scenarios")
+    @classmethod
+    def _validate_latency_series(cls, values: list[int]) -> list[int]:
+        if not values:
+            raise ValueError("execution_costs.latency_bars_scenarios must be non-empty")
+        output: list[int] = []
+        for value in values:
+            if value < 0:
+                raise ValueError("execution_costs.latency_bars_scenarios values must be >= 0")
+            output.append(value)
+        return output
+
+    @model_validator(mode="after")
+    def _validate_scenario_lengths(self) -> ExecutionCostsConfig:
+        scenario_count = len(self.slippage_bps_scenarios)
+        if len(self.commission_bps_scenarios) != scenario_count:
+            raise ValueError(
+                "execution_costs.commission_bps_scenarios length must match "
+                "execution_costs.slippage_bps_scenarios"
+            )
+        if len(self.latency_bars_scenarios) != scenario_count:
+            raise ValueError(
+                "execution_costs.latency_bars_scenarios length must match "
+                "execution_costs.slippage_bps_scenarios"
+            )
+        return self
+
+
+class CitationsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pack_path: str = DEFAULT_CITATIONS_PACK_PATH
+
+    @field_validator("pack_path")
+    @classmethod
+    def _non_empty_pack_path(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("citations.pack_path must be non-empty")
+        return candidate
+
+
 class ArchiveConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -663,6 +882,9 @@ class Settings(BaseModel):
     signal: SignalConfig = Field(default_factory=SignalConfig)
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
+    validation: ValidationConfig = Field(default_factory=ValidationConfig)
+    execution_costs: ExecutionCostsConfig = Field(default_factory=ExecutionCostsConfig)
+    citations: CitationsConfig = Field(default_factory=CitationsConfig)
     archive: ArchiveConfig = Field(default_factory=ArchiveConfig)
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     live: LiveConfig = Field(default_factory=LiveConfig)
@@ -766,6 +988,32 @@ class Settings(BaseModel):
                     "strategy.routes[{}] references ambiguous outfit '{}' while "
                     "strategy.ambiguity_policy=fail".format(index, route.outfit_id)
                 )
+
+        unknown_scope = [
+            symbol for symbol in self.validation.scope_symbols if symbol not in self.universe.symbol_markets
+        ]
+        if unknown_scope:
+            raise ValueError(
+                "validation.scope_symbols contains symbols missing from universe.symbol_markets: "
+                + ", ".join(sorted(unknown_scope))
+            )
+        if self.validation.regime.proxy_symbol not in self.universe.symbol_markets:
+            raise ValueError(
+                "validation.regime.proxy_symbol '{}' is missing from universe.symbol_markets".format(
+                    self.validation.regime.proxy_symbol
+                )
+            )
+
+        citations_pack_path = Path(self.citations.pack_path)
+        if not citations_pack_path.exists():
+            raise FileNotFoundError(
+                f"Citations pack not found: {citations_pack_path}"
+            )
+        alignment_rules_path = Path(self.validation.author_alignment_rules_path)
+        if not alignment_rules_path.exists():
+            raise FileNotFoundError(
+                f"Author alignment rules file not found: {alignment_rules_path}"
+            )
         return self
 
 

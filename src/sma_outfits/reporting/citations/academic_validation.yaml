@@ -1,0 +1,88 @@
+version: 1
+generated_at_utc: "2026-02-22T00:00:00Z"
+citations:
+  - id: white_2000_reality_check
+    title: "A Reality Check for Data Snooping"
+    authors:
+      - "Halbert White"
+    year: 2000
+    venue: "Econometrica"
+    type: "journal"
+    url: "https://econpapers.repec.org/RePEc:ecm:emetrp:v:68:y:2000:i:5:p:1097-1126"
+    why_it_matters: "Foundational correction for multiple strategy comparisons under data snooping risk."
+    retrieved_at_utc: "2026-02-22T00:00:00Z"
+  - id: hansen_2005_spa
+    title: "A Test for Superior Predictive Ability"
+    authors:
+      - "Peter R. Hansen"
+    year: 2005
+    venue: "Journal of Business and Economic Statistics"
+    type: "journal"
+    url: "https://econpapers.repec.org/RePEc:bes:jnlbes:v:23:y:2005:p:365-380"
+    why_it_matters: "Defines a robust test for comparing forecasting strategies with dependence-aware corrections."
+    retrieved_at_utc: "2026-02-22T00:00:00Z"
+  - id: bailey_2017_prob_backtest_overfit
+    title: "The Probability of Backtest Overfitting"
+    authors:
+      - "David H. Bailey"
+      - "Jonathan M. Borwein"
+      - "Marcos López de Prado"
+      - "Qiji Jim Zhu"
+    year: 2017
+    venue: "Journal of Computational Finance"
+    type: "journal"
+    url: "https://ideas.repec.org/a/rsk/journ4/2464632.html"
+    why_it_matters: "Provides practical overfitting diagnostics and emphasizes strict out-of-sample evaluation."
+    retrieved_at_utc: "2026-02-22T00:00:00Z"
+  - id: benjamini_hochberg_1995_fdr
+    title: "Controlling the False Discovery Rate: A Practical and Powerful Approach to Multiple Testing"
+    authors:
+      - "Yoav Benjamini"
+      - "Yosef Hochberg"
+    year: 1995
+    venue: "Journal of the Royal Statistical Society Series B"
+    type: "journal"
+    url: "https://doi.org/10.1111/j.2517-6161.1995.tb02031.x"
+    why_it_matters: "Core multiple-testing control used for q-value gating across strategy hypotheses."
+    retrieved_at_utc: "2026-02-22T00:00:00Z"
+  - id: politis_white_2004_block_length
+    title: "Automatic Block-Length Selection for the Dependent Bootstrap"
+    authors:
+      - "Dimitris N. Politis"
+      - "Halbert White"
+    year: 2004
+    venue: "Statistica Sinica"
+    type: "journal"
+    url: "https://www3.stat.sinica.edu.tw/statistica/j14n1/j14n11/j14n11.html"
+    why_it_matters: "Grounds block-bootstrap choices when returns are serially dependent."
+    retrieved_at_utc: "2026-02-22T00:00:00Z"
+  - id: dong_2024_ml_stock_baseline
+    title: "Machine Learning Methods for Stock Price Prediction"
+    authors:
+      - "Dong et al."
+    year: 2024
+    venue: "Knowledge-Based Systems"
+    type: "journal"
+    url: "https://www.sciencedirect.com/science/article/pii/S0950705124002934"
+    why_it_matters: "Provides modern comparator context for predictive methodology quality and evaluation framing."
+    retrieved_at_utc: "2026-02-22T00:00:00Z"
+  - id: rahimikia_2026_gt_score
+    title: "GT-Score Framework for Robust Trading Evaluation"
+    authors:
+      - "Rahimikia et al."
+    year: 2026
+    venue: "FinTech"
+    type: "journal"
+    url: "https://doi.org/10.3390/fi18020081"
+    why_it_matters: "Recent benchmark context for generalized robustness scoring across trading systems."
+    retrieved_at_utc: "2026-02-22T00:00:00Z"
+  - id: khilar_2025_cv_monte_carlo
+    title: "Cross-Validation and Monte Carlo Robustness in Algorithmic Trading"
+    authors:
+      - "Khilar et al."
+    year: 2025
+    venue: "arXiv"
+    type: "preprint"
+    url: "https://arxiv.org/abs/2512.12924"
+    why_it_matters: "Recent methodology reference for CV and Monte Carlo robustness checks in trading systems."
+    retrieved_at_utc: "2026-02-22T00:00:00Z"

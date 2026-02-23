@@ -1,0 +1,43 @@
+version: 1
+description: "Checklist used to compute deterministic replication score for academic validation readiness."
+rules:
+  - id: wfo_min_folds
+    description: "Walk-forward fold count meets configured minimum."
+    evidence_key: "wfo_min_folds"
+    weight: 1.0
+  - id: wfo_min_closed_trades_per_fold
+    description: "Each OOS fold has enough closed trades."
+    evidence_key: "wfo_min_closed_trades_per_fold"
+    weight: 1.0
+  - id: oos_sharpe_threshold
+    description: "Aggregate OOS Sharpe meets configured threshold."
+    evidence_key: "oos_sharpe_threshold"
+    weight: 1.0
+  - id: oos_calmar_threshold
+    description: "Aggregate OOS Calmar meets configured threshold."
+    evidence_key: "oos_calmar_threshold"
+    weight: 1.0
+  - id: bootstrap_significance
+    description: "One-sided bootstrap p-value passes alpha threshold."
+    evidence_key: "bootstrap_significance"
+    weight: 1.0
+  - id: fdr_gate
+    description: "FDR-adjusted q-values pass threshold."
+    evidence_key: "fdr_gate"
+    weight: 1.0
+  - id: regime_positive_means
+    description: "Regime split means are positive for high-vol and low-vol."
+    evidence_key: "regime_positive_means"
+    weight: 1.0
+  - id: random_mc_outperformance
+    description: "Observed average return beats random-strategy Monte Carlo expectation."
+    evidence_key: "random_mc_outperformance"
+    weight: 1.0
+  - id: execution_realism_non_negative
+    description: "Most conservative net scenario is not strongly negative."
+    evidence_key: "execution_realism_non_negative"
+    weight: 1.0
+  - id: citation_pack_present
+    description: "Citation pack loaded and valid."
+    evidence_key: "citation_pack_present"
+    weight: 1.0

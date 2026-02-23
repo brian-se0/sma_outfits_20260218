@@ -824,6 +824,9 @@ def replay(
         position_rows=[event_to_record(event) for event in result.position_events],
         start=start_ts,
         end=end_ts,
+        validation=settings.validation,
+        execution_costs=settings.execution_costs,
+        citations=settings.citations,
     )
     if progress_bar is not None:
         progress_bar.close()
@@ -866,6 +869,11 @@ def verify_readiness(
         True,
         "--require-run-manifest/--no-require-run-manifest",
         help="Require a complete archive/runs/*/run_manifest.json",
+    ),
+    require_academic_validation: bool = typer.Option(
+        True,
+        "--require-academic-validation/--no-require-academic-validation",
+        help="Require strict academic validation gate from summary appendix outputs",
     ),
 ) -> None:
     assert_python_runtime()
@@ -1042,10 +1050,38 @@ def verify_readiness(
         position_rows=positions,
         start=start_ts,
         end=end_ts,
+        validation=settings.validation,
+        execution_costs=settings.execution_costs,
+        citations=settings.citations,
     )
+    academic_validation = summary.get("academic_validation")
+    if not isinstance(academic_validation, dict):
+        raise RuntimeError(
+            "Readiness acceptance failed: summary contract missing academic_validation payload"
+        )
+    academic_ready = bool(academic_validation.get("ready", False))
+    academic_blocking_reasons = academic_validation.get("blocking_reasons", [])
+    if not isinstance(academic_blocking_reasons, list):
+        academic_blocking_reasons = []
+    if require_academic_validation and not academic_ready:
+        raise RuntimeError(
+            "Readiness acceptance failed: academic validation gate failed: "
+            + (
+                ", ".join(str(reason) for reason in academic_blocking_reasons)
+                if academic_blocking_reasons
+                else "unknown_reason"
+            )
+        )
 
     report_root = Path(settings.archive.root) / "reports"
-    report_files = sorted([*report_root.glob("*.md"), *report_root.glob("*.csv")])
+    report_files = sorted(
+        [
+            *report_root.glob("*.md"),
+            *report_root.glob("*.csv"),
+            *report_root.glob("*.json"),
+            *(report_root / "figures").glob("*.png"),
+        ]
+    )
     if require_report_artifacts and not report_files:
         raise RuntimeError(
             "Readiness acceptance failed: no report artifacts found in "
@@ -1093,6 +1129,14 @@ def verify_readiness(
             "closed_positions": summary["strike_attribution"]["closed_positions"],
             "attribution_mode": summary["attribution_mode"],
         },
+        "academic_validation": {
+            "ready": academic_ready,
+            "blocking_reasons": academic_blocking_reasons,
+            "fold_count": int(academic_validation.get("fold_count", 0)),
+            "min_fold_trade_count": int(academic_validation.get("min_fold_trade_count", 0)),
+            "bootstrap_p_value": academic_validation.get("bootstrap_p_value"),
+            "fdr_summary": academic_validation.get("fdr_summary", {}),
+        },
         "artifact_hashes": hashes,
     }
     manifest_path, hash_path, digest = _write_json_with_hash(payload, output)
@@ -1127,6 +1171,9 @@ def report(
         position_rows=positions,
         start=start_ts,
         end=end_ts,
+        validation=settings.validation,
+        execution_costs=settings.execution_costs,
+        citations=settings.citations,
     )
     label = (
         f"{start_ts.strftime('%Y%m%d')}_{end_ts.strftime('%Y%m%d')}"
@@ -1205,7 +1252,14 @@ def write_run_manifest(
     reports_root = archive_root / "reports"
     threads_root = archive_root / "threads"
     events_files = sorted(events_root.glob("*.jsonl")) if events_root.exists() else []
-    report_files = sorted([*reports_root.glob("*.md"), *reports_root.glob("*.csv")])
+    report_files = sorted(
+        [
+            *reports_root.glob("*.md"),
+            *reports_root.glob("*.csv"),
+            *reports_root.glob("*.json"),
+            *(reports_root / "figures").glob("*.png"),
+        ]
+    )
     thread_files = sorted(threads_root.glob("*.md")) if threads_root.exists() else []
     artifact_hashes: dict[str, str] = {}
     for path in sorted([*events_files, *report_files]):

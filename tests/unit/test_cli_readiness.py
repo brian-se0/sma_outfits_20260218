@@ -165,6 +165,7 @@ def test_verify_readiness_writes_acceptance_manifest(
         output=output_path,
         require_report_artifacts=False,
         require_run_manifest=False,
+        require_academic_validation=False,
     )
 
     assert output_path.exists()
@@ -174,6 +175,15 @@ def test_verify_readiness_writes_acceptance_manifest(
     assert payload["status"] == "ok"
     assert payload["pairs_checked"] == 2
     assert payload["timeframes"] == ["1m"]
+    assert "academic_validation" in payload
+    assert set(payload["academic_validation"].keys()) >= {
+        "ready",
+        "blocking_reasons",
+        "fold_count",
+        "min_fold_trade_count",
+        "bootstrap_p_value",
+        "fdr_summary",
+    }
 
 
 def test_verify_readiness_fails_when_backfill_coverage_missing(
@@ -209,6 +219,7 @@ def test_verify_readiness_fails_when_backfill_coverage_missing(
             output=Path("ignored.json"),
             require_report_artifacts=False,
             require_run_manifest=False,
+            require_academic_validation=False,
         )
 
 
@@ -246,6 +257,7 @@ def test_verify_readiness_fails_when_boundary_coverage_violation_detected(
             output=Path("ignored.json"),
             require_report_artifacts=False,
             require_run_manifest=False,
+            require_academic_validation=False,
         )
 
 
@@ -283,6 +295,7 @@ def test_verify_readiness_fails_when_gap_quality_violation_detected(
             output=Path("ignored.json"),
             require_report_artifacts=False,
             require_run_manifest=False,
+            require_academic_validation=False,
         )
 
 
@@ -320,6 +333,7 @@ def test_verify_readiness_fails_when_run_manifest_required_and_missing(
             output=Path("ignored.json"),
             require_report_artifacts=False,
             require_run_manifest=True,
+            require_academic_validation=False,
         )
 
 

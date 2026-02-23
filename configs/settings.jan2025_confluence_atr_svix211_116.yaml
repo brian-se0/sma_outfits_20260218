@@ -378,3 +378,40 @@ storage_root: artifacts/svix211_116/storage
 events_root: artifacts/svix211_116/events
 outfits_path: src/sma_outfits/config/outfits.yaml
 
+
+validation:
+  scope_symbols: [QQQ, SPY, TQQQ, SQQQ, SVIX, VIXY]
+  wfo:
+    train_months: 24
+    test_months: 6
+    step_months: 6
+    min_folds: 5
+    min_closed_trades_per_fold: 50
+  thresholds:
+    oos_sharpe_min: 1.5
+    oos_calmar_min: 2.0
+    bootstrap_pvalue_max: 0.05
+    fdr_qvalue_max: 0.05
+    replication_score_min: 0.8
+  bootstrap:
+    method: stationary_block
+    samples: 10000
+    alpha: 0.05
+  multiple_testing:
+    method: fdr_bh
+  regime:
+    proxy_symbol: VIXY
+    require_positive_mean_in_each: true
+  random_strategy_mc_samples: 10000
+  seed: 42
+  author_alignment_rules_path: src/sma_outfits/reporting/citations/author_alignment_rules.yaml
+
+execution_costs:
+  slippage_bps_scenarios: [2.0, 3.5, 5.0]
+  commission_bps_scenarios: [0.5, 0.75, 1.0]
+  latency_bars_scenarios: [0, 1, 1]
+  partial_fill_round_lot: true
+
+citations:
+  pack_path: src/sma_outfits/reporting/citations/academic_validation.yaml
+

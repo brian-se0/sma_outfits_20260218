@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime
+import json
 import math
 from pathlib import Path
 from statistics import median
@@ -10,7 +11,16 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from sma_outfits.config.models import CitationsConfig, ExecutionCostsConfig, ValidationConfig
 from sma_outfits.events import PositionEvent, SignalEvent, StrikeEvent
+from sma_outfits.reporting.academic_validation import (
+    build_academic_validation_payload,
+    write_bootstrap_histogram_png,
+)
+from sma_outfits.reporting.execution_realism import (
+    build_execution_realism_overlay,
+    public_execution_realism_payload,
+)
 from sma_outfits.utils import ensure_utc_timestamp
 
 def build_summary(
@@ -77,6 +87,9 @@ def build_summary_from_records(
     position_rows: list[dict[str, Any]],
     start: pd.Timestamp | None = None,
     end: pd.Timestamp | None = None,
+    validation: ValidationConfig | None = None,
+    execution_costs: ExecutionCostsConfig | None = None,
+    citations: CitationsConfig | None = None,
 ) -> dict[str, Any]:
     strikes = [_record_to_strike(row) for row in strike_rows]
     signals = [_record_to_signal(row) for row in signal_rows]
@@ -97,10 +110,35 @@ def build_summary_from_records(
         end=end,
     )
 
+    close_outcomes = _closed_outcomes_for_close_attribution(
+        strikes=strikes,
+        signals=signals,
+        positions=positions,
+        start=start,
+        end=end,
+    )
+    validation_config = validation or ValidationConfig()
+    execution_costs_config = execution_costs or ExecutionCostsConfig()
+    citations_config = citations or CitationsConfig()
+
+    execution_realism_overlay = build_execution_realism_overlay(
+        closed_outcomes=close_outcomes,
+        execution_costs=execution_costs_config,
+    )
+    academic_validation = build_academic_validation_payload(
+        closed_outcomes=close_outcomes,
+        validation=validation_config,
+        citations=citations_config,
+        execution_realism_overlay=execution_realism_overlay,
+    )
+    execution_realism = public_execution_realism_payload(execution_realism_overlay)
+
     return {
         "attribution_mode": "both",
         "strike_attribution": dict(strike_summary),
         "close_attribution": dict(close_summary),
+        "execution_realism": execution_realism,
+        "academic_validation": academic_validation,
     }
 
 
@@ -112,6 +150,12 @@ def write_summary_report(
     root.mkdir(parents=True, exist_ok=True)
     markdown_path = root / f"{label}.md"
     csv_path = root / f"{label}.csv"
+    academic_json_path = root / f"{label}_academic_validation.json"
+    wfo_csv_path = root / f"{label}_wfo_table.csv"
+    pvalues_csv_path = root / f"{label}_pvalues.csv"
+    bootstrap_bins_csv_path = root / f"{label}_bootstrap_bins.csv"
+    figures_root = root / "figures"
+    bootstrap_png_path = figures_root / f"{label}_bootstrap_hist.png"
 
     attribution_mode = str(summary.get("attribution_mode", ""))
     if attribution_mode != "both":
@@ -120,6 +164,8 @@ def write_summary_report(
         )
     strike_summary = _require_strike_attribution(summary)
     close_summary = _require_close_attribution(summary)
+    execution_realism = _require_execution_realism(summary)
+    academic_validation = _require_academic_validation(summary)
     markdown: list[str] = [
         f"# Replay Summary: {label}",
         "",
@@ -140,14 +186,76 @@ def write_summary_report(
             summary=close_summary,
         )
     )
+    markdown.append("")
+    markdown.extend(
+        _render_academic_validation_appendix(
+            academic_validation=academic_validation,
+            execution_realism=execution_realism,
+        )
+    )
 
     markdown_path.write_text("\n".join(markdown) + "\n", encoding="utf-8")
 
     flattened = {"attribution_mode": "both"}
     flattened.update(_flatten_summary(strike_summary, prefix="strike_"))
     flattened.update(_flatten_summary(close_summary, prefix="close_"))
+    flattened["academic_validation_ready"] = bool(academic_validation.get("ready", False))
+    flattened["academic_validation_fold_count"] = int(academic_validation.get("fold_count", 0))
+    flattened["academic_validation_min_fold_trade_count"] = int(
+        academic_validation.get("min_fold_trade_count", 0)
+    )
+    flattened["academic_validation_bootstrap_p_value"] = academic_validation.get(
+        "bootstrap_p_value"
+    )
+    flattened["academic_validation_gate_scenario_id"] = str(
+        academic_validation.get("gate_scenario_id", "")
+    )
 
     pd.DataFrame([flattened]).to_csv(csv_path, index=False)
+
+    bootstrap_payload = academic_validation.get("bootstrap", {})
+    if not isinstance(bootstrap_payload, dict):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.bootstrap must be a dict"
+        )
+    histogram_bins = bootstrap_payload.get("histogram_bins", [])
+    if not isinstance(histogram_bins, list):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.bootstrap.histogram_bins must be a list"
+        )
+    write_bootstrap_histogram_png(
+        histogram_bins=histogram_bins,
+        output_path=bootstrap_png_path,
+    )
+
+    wfo_rows = academic_validation.get("wfo_folds", [])
+    if not isinstance(wfo_rows, list):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.wfo_folds must be a list"
+        )
+    pd.DataFrame(wfo_rows).to_csv(wfo_csv_path, index=False)
+
+    pvalues_payload = academic_validation.get("pvalues", {})
+    if not isinstance(pvalues_payload, dict):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.pvalues must be a dict"
+        )
+    pvalue_rows = pvalues_payload.get("rows", [])
+    if not isinstance(pvalue_rows, list):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.pvalues.rows must be a list"
+        )
+    pd.DataFrame(pvalue_rows).to_csv(pvalues_csv_path, index=False)
+    pd.DataFrame(histogram_bins).to_csv(bootstrap_bins_csv_path, index=False)
+
+    academic_json_payload = dict(academic_validation)
+    bootstrap_with_path = dict(bootstrap_payload)
+    bootstrap_with_path["histogram_png_path"] = str(bootstrap_png_path)
+    academic_json_payload["bootstrap"] = bootstrap_with_path
+    academic_json_path.write_text(
+        json.dumps(academic_json_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     return markdown_path, csv_path
 
 
@@ -180,6 +288,11 @@ def _compute_signal_outcomes(
                 "Signal outcome contract violation: non-positive realized_qty "
                 f"(signal_id={signal.id})"
             )
+        avg_exit_price = signal.entry
+        if fill_events and realized_qty > 0:
+            avg_exit_price = (
+                sum(float(event.price) * float(event.qty) for event in fill_events) / realized_qty
+            )
         for event in events:
             if event.action in {"partial_take", "close"}:
                 qty_weight = float(event.qty) / realized_qty if realized_qty > 0 else 0.0
@@ -197,12 +310,17 @@ def _compute_signal_outcomes(
         outcomes.append(
             {
                 "signal_id": signal.id,
+                "route_id": signal.route_id,
                 "signal_type": signal.signal_type,
                 "side": signal.side,
                 "symbol": strike.symbol,
                 "outfit_id": strike.outfit_id,
                 "timeframe": strike.timeframe,
                 "realized_r": realized_r,
+                "entry": signal.entry,
+                "stop": signal.stop,
+                "risk_unit": risk_unit,
+                "avg_exit_price": avg_exit_price,
                 "closed": closed,
                 "close_reason": close_reason,
                 "close_ts": close_ts,
@@ -284,6 +402,34 @@ def _build_close_attribution_summary(
         signals=selected_signals,
         position_events=selected_positions,
     )
+
+
+def _closed_outcomes_for_close_attribution(
+    *,
+    strikes: list[StrikeEvent],
+    signals: list[SignalEvent],
+    positions: list[PositionEvent],
+    start: pd.Timestamp | None,
+    end: pd.Timestamp | None,
+) -> list[dict[str, Any]]:
+    strike_lookup = {strike.id: strike for strike in strikes}
+    outcomes = _compute_signal_outcomes(
+        signals=signals,
+        position_events=positions,
+        strike_lookup=strike_lookup,
+    )
+    closed_outcomes = [
+        row
+        for row in outcomes
+        if bool(row["closed"]) and row.get("close_ts") is not None
+    ]
+    if start is None or end is None:
+        return closed_outcomes
+    return [
+        row
+        for row in closed_outcomes
+        if _in_range(row["close_ts"], start, end)
+    ]
 
 
 def _render_markdown_section(
@@ -372,6 +518,219 @@ def _render_markdown_section(
     return markdown
 
 
+def _render_academic_validation_appendix(
+    *,
+    academic_validation: dict[str, Any],
+    execution_realism: dict[str, Any],
+) -> list[str]:
+    ready = bool(academic_validation.get("ready", False))
+    blocking_reasons = academic_validation.get("blocking_reasons", [])
+    if not isinstance(blocking_reasons, list):
+        blocking_reasons = []
+
+    output: list[str] = [
+        "## Academic Validation Appendix",
+        f"- academically_ready: `{str(ready).lower()}`",
+        "- academic_blockers: `{}`".format(
+            ", ".join(str(reason) for reason in blocking_reasons)
+            if blocking_reasons
+            else "none"
+        ),
+        f"- gate_scenario_id: `{academic_validation.get('gate_scenario_id', '')}`",
+        f"- fold_count: `{academic_validation.get('fold_count', 0)}`",
+        f"- min_fold_trade_count: `{academic_validation.get('min_fold_trade_count', 0)}`",
+        f"- bootstrap_p_value: `{academic_validation.get('bootstrap_p_value', None)}`",
+        "",
+        "### Walk-Forward Optimization (WFO)",
+    ]
+    wfo_rows = academic_validation.get("wfo_folds", [])
+    if not isinstance(wfo_rows, list):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.wfo_folds must be a list"
+        )
+    output.extend(
+        _markdown_table(
+            rows=wfo_rows,
+            columns=[
+                "fold_id",
+                "train_start",
+                "train_end",
+                "test_start",
+                "test_end",
+                "closed_trades",
+                "mean_r",
+                "sharpe_annualized",
+                "calmar_annualized",
+                "min_trade_gate_pass",
+            ],
+        )
+    )
+
+    bootstrap_payload = academic_validation.get("bootstrap", {})
+    if not isinstance(bootstrap_payload, dict):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.bootstrap must be a dict"
+        )
+    output.extend(
+        [
+            "",
+            "### Bootstrap Distribution",
+            f"- method: `{bootstrap_payload.get('method', '')}`",
+            f"- samples: `{bootstrap_payload.get('samples', 0)}`",
+            f"- alpha: `{bootstrap_payload.get('alpha', 0.0)}`",
+            "- ci: `{}`".format(bootstrap_payload.get("ci", None)),
+            "- one_sided_p_value_mean_gt_zero: `{}`".format(
+                bootstrap_payload.get("one_sided_p_value_mean_gt_zero", None)
+            ),
+            "",
+            "#### Bootstrap Histogram Bins",
+        ]
+    )
+    histogram_bins = bootstrap_payload.get("histogram_bins", [])
+    if not isinstance(histogram_bins, list):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.bootstrap.histogram_bins must be a list"
+        )
+    output.extend(
+        _markdown_table(
+            rows=histogram_bins,
+            columns=["bin_left", "bin_right", "count"],
+        )
+    )
+
+    pvalues_payload = academic_validation.get("pvalues", {})
+    if not isinstance(pvalues_payload, dict):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.pvalues must be a dict"
+        )
+    output.extend(
+        [
+            "",
+            "### P-Value and Multiple-Testing Summary",
+            f"- method: `{pvalues_payload.get('method', '')}`",
+            f"- qvalue_threshold: `{pvalues_payload.get('qvalue_threshold', None)}`",
+            f"- all_pass: `{pvalues_payload.get('all_pass', False)}`",
+            "",
+        ]
+    )
+    pvalue_rows = pvalues_payload.get("rows", [])
+    if not isinstance(pvalue_rows, list):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.pvalues.rows must be a list"
+        )
+    output.extend(
+        _markdown_table(
+            rows=pvalue_rows,
+            columns=["label", "raw_p_value", "fdr_q_value", "pass_gate"],
+        )
+    )
+
+    output.extend(
+        [
+            "",
+            "### Execution Realism Sensitivity",
+        ]
+    )
+    scenario_rows = execution_realism.get("scenario_table", [])
+    if not isinstance(scenario_rows, list):
+        raise RuntimeError(
+            "Summary contract violation: execution_realism.scenario_table must be a list"
+        )
+    output.extend(
+        _markdown_table(
+            rows=scenario_rows,
+            columns=[
+                "scenario_id",
+                "slippage_bps",
+                "commission_bps",
+                "latency_bars",
+                "closed_positions",
+                "avg_realized_r",
+                "sharpe_annualized",
+                "calmar_annualized",
+            ],
+        )
+    )
+
+    regime_payload = academic_validation.get("regime_stability", {})
+    if not isinstance(regime_payload, dict):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.regime_stability must be a dict"
+        )
+    output.extend(
+        [
+            "",
+            "### Regime Stability",
+            f"- proxy_symbol: `{regime_payload.get('proxy_symbol', '')}`",
+            f"- high_vol_count: `{regime_payload.get('high_vol_count', 0)}`",
+            f"- low_vol_count: `{regime_payload.get('low_vol_count', 0)}`",
+            f"- high_vol_mean_r: `{regime_payload.get('high_vol_mean_r', 0.0)}`",
+            f"- low_vol_mean_r: `{regime_payload.get('low_vol_mean_r', 0.0)}`",
+            f"- passes_requirement: `{regime_payload.get('passes_requirement', False)}`",
+            "- blocking_reasons: `{}`".format(
+                ", ".join(str(value) for value in regime_payload.get("blocking_reasons", []))
+                if regime_payload.get("blocking_reasons")
+                else "none"
+            ),
+            "",
+            "### Citation Pack",
+        ]
+    )
+
+    citation_payload = academic_validation.get("citation_pack", {})
+    if not isinstance(citation_payload, dict):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.citation_pack must be a dict"
+        )
+    citations = citation_payload.get("entries", [])
+    if not isinstance(citations, list):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.citation_pack.entries must be a list"
+        )
+    for row in citations:
+        if not isinstance(row, dict):
+            continue
+        output.append(
+            "- `{}` ({}) {} [{}]".format(
+                row.get("id", ""),
+                row.get("year", ""),
+                row.get("title", ""),
+                row.get("url", ""),
+            )
+        )
+    return output
+
+
+def _markdown_table(
+    *,
+    rows: list[dict[str, Any]],
+    columns: list[str],
+) -> list[str]:
+    if not rows:
+        return ["- none"]
+    lines = [
+        "| " + " | ".join(columns) + " |",
+        "| " + " | ".join(["---"] * len(columns)) + " |",
+    ]
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            "| "
+            + " | ".join(_format_markdown_cell(row.get(column)) for column in columns)
+            + " |"
+        )
+    return lines
+
+
+def _format_markdown_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        return f"{value:.6f}"
+    return str(value).replace("|", "\\|")
+
+
 def _flatten_summary(
     payload: dict[str, Any],
     *,
@@ -399,6 +758,26 @@ def _require_close_attribution(summary: dict[str, Any]) -> dict[str, Any]:
             "dict close_attribution payload"
         )
     return close_payload
+
+
+def _require_execution_realism(summary: dict[str, Any]) -> dict[str, Any]:
+    payload = summary.get("execution_realism")
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            "Summary contract violation: attribution_mode='both' requires "
+            "dict execution_realism payload"
+        )
+    return payload
+
+
+def _require_academic_validation(summary: dict[str, Any]) -> dict[str, Any]:
+    payload = summary.get("academic_validation")
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            "Summary contract violation: attribution_mode='both' requires "
+            "dict academic_validation payload"
+        )
+    return payload
 
 
 def _require_strike_attribution(summary: dict[str, Any]) -> dict[str, Any]:
