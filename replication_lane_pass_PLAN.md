@@ -45,20 +45,20 @@ The goal is to increase fold trade counts and improve quality without invalid sc
 4. Keep existing `soxl_30m_author` unchanged for Stage 1.
 
 ### 2) Makefile Changes
-1. In `Makefile`, update `REPLICATION_SYMBOLS` default to include `SOXL`.
-2. Keep `REPLICATION_TIMEFRAMES` as `30m,1h,2h`.
+1. In `Makefile`, update `LANE_REPLICATION_SYMBOLS` default to include `SOXL`.
+2. Keep `LANE_REPLICATION_TIMEFRAMES` as `30m,1h,2h`.
 3. Do not change strict-lane variables or target behavior.
 4. If help text enumerates replication symbols, update it to match the new default.
 
 ### 3) Docs Changes
-1. Update `make_commands.md` replication defaults so `REPLICATION_SYMBOLS` includes `SOXL`.
+1. Update `make_commands.md` replication defaults so `LANE_REPLICATION_SYMBOLS` includes `SOXL`.
 2. Update any replication-lane command examples that currently omit `SOXL`.
 
 ## Stage Execution and Acceptance
 
 ### Stage 1 Run
 1. `make validate-config CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml`
-2. `make prove-edge-replication`
+2. `make lane LANE=replication LANE_REPLICATION_END=2025-01-31T21:00:00Z`
 
 ### Stage 1 Pass Criteria
 1. `artifacts/readiness/readiness_acceptance.json` has `academic_validation.ready = true`.
@@ -75,7 +75,7 @@ Apply Stage 2 only if Stage 1 fails and the only remaining blocker is trades-per
 1. In `configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml`, change:
    - `validation.wfo.min_closed_trades_per_fold: 10 -> 7`
 2. Re-run:
-   - `make prove-edge-replication`
+   - `make lane LANE=replication LANE_REPLICATION_END=2025-01-31T21:00:00Z`
 
 ### Stage 2 Stop Rule
 Stop when readiness reports academic pass with no fold/sharpe/FDR/regime/replication blockers.  
@@ -84,7 +84,7 @@ If Sharpe/FDR still fail after Stage 1, do not apply threshold fallback as a “
 ## Important Public API / Interface / Type Changes
 1. No Python API/type/schema changes are required for this plan.
 2. Operational interface change:
-   - `Makefile` replication default `REPLICATION_SYMBOLS` will include `SOXL`.
+   - `Makefile` replication default `LANE_REPLICATION_SYMBOLS` will include `SOXL`.
 3. Replication profile behavior change:
    - Added `SOXL` to validation scope,
    - Added `soxl_2h_author`,
@@ -97,7 +97,7 @@ If Sharpe/FDR still fail after Stage 1, do not apply threshold fallback as a “
    - `configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml`
 3. Update `tests/unit/test_makefile_replication_lane.py` to assert replication lane plumbing still exists and now includes SOXL in default replication symbol config (string-level assertion).
 4. Confirm strict lane unchanged by running:
-   - `make prove-edge CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=month` (optional if runtime is acceptable; otherwise defer as manual acceptance).
+   - `make lane LANE=strict CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=month` (optional if runtime is acceptable; otherwise defer as manual acceptance).
 
 ## Assumptions and Defaults
 1. Strict lane remains canonical and unchanged.

@@ -14,10 +14,10 @@ Explicit analysis of SMA outfit (blackbox) use in public equity markets for real
 ## Validation Workflows
 
 - Strict canonical lane:
-  - `make prove-edge CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=month`
+  - `make lane LANE=strict CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=month`
 - Replication alignment lane:
-  - `make prove-edge-replication`
-  - Optional override: `make prove-edge-replication REPLICATION_CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml`
+  - `make lane LANE=replication LANE_REPLICATION_END=2025-01-31T21:00:00Z`
+  - Optional override: `make lane LANE=replication LANE_REPLICATION_CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml LANE_REPLICATION_END=2025-01-31T21:00:00Z`
 - Interpretation:
   - Strict lane failure means the canonical research gate is not met.
   - Replication lane pass means behavior aligns under the moderate sparse/high-conviction profile.

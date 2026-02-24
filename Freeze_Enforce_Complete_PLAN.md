@@ -65,8 +65,8 @@ Guarantee physical separation of strict lane and replication lane outputs.
    - `storage_root`
    - `events_root`
 4. Update [Makefile](d:\sma_outfits_20260218\Makefile):
-   - `PROVEN_EDGE_CONFIG` default -> strict runtime config.
-   - `REPLICATION_CONFIG` default -> replication runtime config.
+   - `LANE_STRICT_CONFIG` default -> strict runtime config.
+   - `LANE_REPLICATION_CONFIG` default -> replication runtime config.
    - add `PRODUCTION_CONFIG` default -> production runtime config.
    - set strict readiness/discovery outputs under `artifacts/readiness/strict/...`.
    - set replication readiness/discovery outputs under `artifacts/readiness/replication/...`.
@@ -184,7 +184,7 @@ Create an auditable operational gate before any live escalation.
 
 ### Make interface
 1. New targets: `freeze-replication-config`, `init-live-paper`, `run-paper-session`, `paper-validate-window`.
-2. `prove-edge` / `prove-edge-replication` defaults updated to lane runtime configs and lane-specific readiness outputs.
+2. `lane` strict/replication defaults updated to lane runtime configs and lane-specific readiness outputs.
 
 ### Artifact contract additions
 1. `events/risk_alerts.jsonl`
