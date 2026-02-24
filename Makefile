@@ -66,7 +66,11 @@ DISCOVER_START ?= $(ALPACA_BASIC_HISTORICAL_START)
 DISCOVER_RANGE_OUTPUT ?= artifacts/readiness/discovered_range_manifest.json
 READINESS_ACCEPTANCE_OUTPUT ?= artifacts/readiness/readiness_acceptance.json
 READINESS_END ?= $(MAX_END)
-FULL_RANGE_START ?= $(shell powershell -NoProfile -Command 'if (Test-Path "$(DISCOVER_RANGE_OUTPUT)") { $$payload = Get-Content -Path "$(DISCOVER_RANGE_OUTPUT)" -Raw | ConvertFrom-Json; $$value = $$payload.full_range_start; if ($$null -ne $$value) { if ($$value -is [datetime]) { $$value = $$value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }; [Console]::Out.Write([string]$$value) } }')
+FULL_RANGE_START_COMPUTED := $(shell powershell -NoProfile -Command 'if (Test-Path "$(DISCOVER_RANGE_OUTPUT)") { $$payload = Get-Content -Path "$(DISCOVER_RANGE_OUTPUT)" -Raw | ConvertFrom-Json; $$value = $$payload.full_range_start; if ($$null -ne $$value) { if ($$value -is [datetime]) { $$value = $$value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }; [Console]::Out.Write([string]$$value) } }')
+FULL_RANGE_START ?= $(FULL_RANGE_START_COMPUTED)
+ifeq ($(strip $(FULL_RANGE_START)),)
+FULL_RANGE_START := $(FULL_RANGE_START_COMPUTED)
+endif
 VERIFY_READINESS_ARGS ?=
 PROVEN_EDGE_SYMBOLS ?= QQQ,SPY,TQQQ,SQQQ,SVIX,VIXY
 PROVEN_EDGE_TIMEFRAMES ?= 30m,1h
@@ -77,7 +81,11 @@ REPLICATION_SYMBOLS ?= QQQ,SPY,TQQQ,SQQQ,SVIX,VIXY,XLF,SMH,SOXL
 REPLICATION_TIMEFRAMES ?= 30m,1h,2h
 REPLICATION_DISCOVER_OUTPUT ?= artifacts/readiness/discovered_range_replication.json
 REPLICATION_END ?= $(READINESS_END)
-REPLICATION_FULL_RANGE_START ?= $(shell powershell -NoProfile -Command 'if (Test-Path "$(REPLICATION_DISCOVER_OUTPUT)") { $$payload = Get-Content -Path "$(REPLICATION_DISCOVER_OUTPUT)" -Raw | ConvertFrom-Json; $$value = $$payload.full_range_start; if ($$null -ne $$value) { if ($$value -is [datetime]) { $$value = $$value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }; [Console]::Out.Write([string]$$value) } }')
+REPLICATION_FULL_RANGE_START_COMPUTED := $(shell powershell -NoProfile -Command 'if (Test-Path "$(REPLICATION_DISCOVER_OUTPUT)") { $$payload = Get-Content -Path "$(REPLICATION_DISCOVER_OUTPUT)" -Raw | ConvertFrom-Json; $$value = $$payload.full_range_start; if ($$null -ne $$value) { if ($$value -is [datetime]) { $$value = $$value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }; [Console]::Out.Write([string]$$value) } }')
+REPLICATION_FULL_RANGE_START ?= $(REPLICATION_FULL_RANGE_START_COMPUTED)
+ifeq ($(strip $(REPLICATION_FULL_RANGE_START)),)
+REPLICATION_FULL_RANGE_START := $(REPLICATION_FULL_RANGE_START_COMPUTED)
+endif
 
 ifeq ($(PROFILE),smoke)
 PROFILE_START := 2025-01-02T14:30:00Z

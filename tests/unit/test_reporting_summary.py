@@ -336,6 +336,9 @@ def test_write_summary_report_both_mode_adds_close_columns_and_sections(tmp_path
     assert "Strike-Time Attribution" in markdown
     assert "Close-Time Attribution" in markdown
     assert "Academic Validation Appendix" in markdown
+    assert "Claim Scope (Statistical)" in markdown
+    assert "null_hypothesis: `mean(net_realized_r) <= 0`" in markdown
+    assert "supports_causal_inference: `False`" in markdown
     assert "Walk-Forward Optimization (WFO)" in markdown
     assert "available_months" in markdown
     assert "required_months_for_min_folds" in markdown

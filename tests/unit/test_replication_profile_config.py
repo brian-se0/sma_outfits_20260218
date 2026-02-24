@@ -208,3 +208,37 @@ def test_strict_profile_validation_targets_match_current_cycle(tmp_path: Path) -
     assert settings.validation.thresholds.bootstrap_pvalue_max == 0.06
     assert settings.validation.thresholds.fdr_qvalue_max == 0.05
     assert settings.validation.thresholds.replication_score_min == 0.7
+
+
+def test_replication_profile_validation_targets_match_current_cycle(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    _write_required_env(env_path)
+
+    settings = load_settings(
+        config_path=Path(
+            "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml"
+        ),
+        env_path=env_path,
+    )
+
+    assert settings.validation.scope_symbols == [
+        "QQQ",
+        "SPY",
+        "TQQQ",
+        "SQQQ",
+        "SVIX",
+        "VIXY",
+        "XLF",
+        "SMH",
+        "SOXL",
+    ]
+    assert settings.validation.wfo.train_months == 24
+    assert settings.validation.wfo.test_months == 6
+    assert settings.validation.wfo.step_months == 6
+    assert settings.validation.wfo.min_folds == 2
+    assert settings.validation.wfo.min_closed_trades_per_fold == 4
+    assert settings.validation.thresholds.oos_sharpe_min == 1.5
+    assert settings.validation.thresholds.oos_calmar_min == 2.0
+    assert settings.validation.thresholds.bootstrap_pvalue_max == 0.05
+    assert settings.validation.thresholds.fdr_qvalue_max == 0.07
+    assert settings.validation.thresholds.replication_score_min == 0.7

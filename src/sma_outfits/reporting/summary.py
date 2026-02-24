@@ -543,8 +543,26 @@ def _render_academic_validation_appendix(
         f"- min_fold_trade_count: `{academic_validation.get('min_fold_trade_count', 0)}`",
         f"- bootstrap_p_value: `{academic_validation.get('bootstrap_p_value', None)}`",
         "",
-        "### Walk-Forward Optimization (WFO)",
+        "### Claim Scope (Statistical)",
     ]
+    claim_scope = academic_validation.get("claim_scope", {})
+    if not isinstance(claim_scope, dict):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.claim_scope must be a dict"
+        )
+    output.extend(
+        [
+            f"- objective: `{claim_scope.get('objective', '')}`",
+            f"- null_hypothesis: `{claim_scope.get('null_hypothesis', '')}`",
+            f"- alternative_hypothesis: `{claim_scope.get('alternative_hypothesis', '')}`",
+            f"- supports_causal_inference: `{claim_scope.get('supports_causal_inference', False)}`",
+            "- causal_inference_statement: `{}`".format(
+                claim_scope.get("causal_inference_statement", "")
+            ),
+            "",
+            "### Walk-Forward Optimization (WFO)",
+        ]
+    )
     wfo_feasibility = academic_validation.get("wfo_feasibility", {})
     if not isinstance(wfo_feasibility, dict):
         raise RuntimeError(

@@ -28,6 +28,20 @@ _CITATION_REQUIRED_FIELDS = {
     "retrieved_at_utc",
 }
 
+_CLAIM_SCOPE = {
+    "objective": (
+        "Assess whether configured SMA outfit events provide positive expected net realized R "
+        "for the tested dataset and assumptions."
+    ),
+    "null_hypothesis": "mean(net_realized_r) <= 0",
+    "alternative_hypothesis": "mean(net_realized_r) > 0",
+    "supports_causal_inference": False,
+    "causal_inference_statement": (
+        "This validation does not establish causal claims about market manipulation "
+        "or attribution to specific institutions."
+    ),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class _AlignmentRule:
@@ -186,6 +200,7 @@ def build_academic_validation_payload(
     return {
         "ready": ready,
         "blocking_reasons": blocking_reasons,
+        "claim_scope": dict(_CLAIM_SCOPE),
         "scope_symbols": list(validation.scope_symbols),
         "gate_scenario_id": str(execution_realism_overlay.get("gate_scenario_id", "")),
         "gate_scenario_metrics": dict(execution_realism_overlay.get("gate_scenario_metrics", {})),

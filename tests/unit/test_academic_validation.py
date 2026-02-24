@@ -107,6 +107,10 @@ def test_academic_validation_fold_construction_is_deterministic() -> None:
     assert payload_a["wfo_folds"] == payload_b["wfo_folds"]
     assert payload_a["fold_count"] >= validation.wfo.min_folds
     assert payload_a["ready"] is True
+    claim_scope = payload_a["claim_scope"]
+    assert claim_scope["null_hypothesis"] == "mean(net_realized_r) <= 0"
+    assert claim_scope["alternative_hypothesis"] == "mean(net_realized_r) > 0"
+    assert claim_scope["supports_causal_inference"] is False
 
 
 def test_academic_validation_hard_fails_when_any_fold_trade_count_below_minimum() -> None:

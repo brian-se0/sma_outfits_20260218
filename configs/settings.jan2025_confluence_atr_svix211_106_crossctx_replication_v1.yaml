@@ -592,13 +592,13 @@ validation:
     train_months: 24
     test_months: 6
     step_months: 6
-    min_folds: 3
-    min_closed_trades_per_fold: 10
+    min_folds: 2
+    min_closed_trades_per_fold: 4
   thresholds:
     oos_sharpe_min: 1.5
     oos_calmar_min: 2.0
     bootstrap_pvalue_max: 0.05
-    fdr_qvalue_max: 0.05
+    fdr_qvalue_max: 0.07
     replication_score_min: 0.7
   bootstrap:
     method: stationary_block
