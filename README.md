@@ -5,10 +5,22 @@ Explicit analysis of SMA outfit (blackbox) use in public equity markets for real
 ## Implementation Contract (Current Code)
 
 - Runtime/data provider: Alpaca-only ingestion and execution paths.
+- Free-tier data bounds: defaults assume Alpaca Basic historical equities availability since `2016-01-01` and apply a `15` minute historical lag buffer.
 - Config contract: no legacy `strategy.mode`; behavior is route/config driven.
 - Reporting contract: canonical `both` attribution only (`strike_attribution` + `close_attribution`).
 - Live/replay parity: `atr_dynamic_stop` and `cross_symbol_context` are supported in both modes.
 - Fallback code paths (stream reconnect/stale-feed recovery/idempotent duplicate handling) are intentionally preserved.
+
+## Validation Workflows
+
+- Strict canonical lane:
+  - `make prove-edge CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=month`
+- Replication alignment lane:
+  - `make prove-edge-replication`
+  - Optional override: `make prove-edge-replication REPLICATION_CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml`
+- Interpretation:
+  - Strict lane failure means the canonical research gate is not met.
+  - Replication lane pass means behavior aligns under the moderate sparse/high-conviction profile.
 
 ## Repository Structure
 This repository is organized to provide a comprehensive understanding of SMA (Simple Moving Average) outfits and their direct impact on market dynamics. Each directory contains specific resources tailored to different aspects of SMA analysis:

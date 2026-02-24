@@ -16,18 +16,49 @@ def _write_readiness_bars(
     start: str,
     end: str,
 ) -> None:
-    bars = pd.DataFrame(
-        {
-            "ts": [pd.Timestamp(start), pd.Timestamp(end)],
-            "open": [100.0, 100.2],
-            "high": [100.4, 100.6],
-            "low": [99.8, 100.0],
-            "close": [100.1, 100.3],
-            "volume": [1000.0, 1100.0],
-        }
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+    month_range_start = pd.Timestamp(
+        year=start_ts.year,
+        month=start_ts.month,
+        day=1,
+        tz="UTC",
     )
+    month_starts = pd.date_range(start=month_range_start, end=end_ts.normalize(), freq="MS", tz="UTC")
+    ts_values: list[pd.Timestamp] = [start_ts]
+    close_values: list[float] = [100.0]
+    last_close = 100.0
+    month_index = 0
+    for month_start in month_starts:
+        first_ts = month_start + pd.Timedelta(days=4, hours=14, minutes=30)
+        second_ts = month_start + pd.Timedelta(days=19, hours=14, minutes=30)
+        if first_ts <= start_ts or first_ts >= end_ts:
+            continue
+        ts_values.append(first_ts)
+        first_close = last_close * (1.0 + 0.001)
+        close_values.append(first_close)
+        if second_ts < end_ts:
+            ts_values.append(second_ts)
+            intra_month_jump = 0.03 if (month_index % 2) == 0 else 0.01
+            second_close = first_close * (1.0 + intra_month_jump)
+            close_values.append(second_close)
+            last_close = second_close
+        else:
+            last_close = first_close
+        month_index += 1
+    if ts_values[-1] != end_ts:
+        ts_values.append(end_ts)
+        close_values.append(last_close * (1.0 + 0.001))
+
+    bars = pd.DataFrame({"ts": ts_values, "close": close_values}).sort_values("ts").reset_index(drop=True)
+    bars["open"] = bars["close"] * 0.999
+    bars["high"] = bars["close"] * 1.001
+    bars["low"] = bars["close"] * 0.998
+    bars["volume"] = 1000.0
+    bars = bars.loc[:, ["ts", "open", "high", "low", "close", "volume"]]
     storage.write_bars(bars, symbol="SPY", timeframe="1m")
     storage.write_bars(bars, symbol="QQQ", timeframe="1m")
+    storage.write_bars(bars, symbol="VIXY", timeframe="1m")
 
 
 def _append_outcomes(
@@ -108,6 +139,7 @@ def test_verify_readiness_fails_academic_gate_with_insufficient_edge(
     weak_settings = settings.model_copy(deep=True)
     weak_settings.validation.bootstrap.samples = 120
     weak_settings.validation.random_strategy_mc_samples = 120
+    weak_settings.validation.regime.proxy_timeframe = "1m"
     monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
     monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: weak_settings)
 
@@ -151,6 +183,7 @@ def test_verify_readiness_passes_academic_gate_with_strict_fixture_data(
     strong_settings = settings.model_copy(deep=True)
     strong_settings.validation.bootstrap.samples = 160
     strong_settings.validation.random_strategy_mc_samples = 160
+    strong_settings.validation.regime.proxy_timeframe = "1m"
     monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
     monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: strong_settings)
 

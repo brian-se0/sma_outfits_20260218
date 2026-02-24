@@ -4,6 +4,7 @@ import asyncio
 import csv
 import hashlib
 import json
+import math
 from pathlib import Path
 import subprocess
 
@@ -38,6 +39,8 @@ from sma_outfits.runtime import assert_python_runtime
 from sma_outfits.utils import dedupe_keep_order, ensure_utc_timestamp, market_for_symbol, parse_csv
 
 app = typer.Typer(add_completion=False, help="SMA outfits Alpaca-only recreation CLI")
+_ALPACA_BASIC_HISTORICAL_START_UTC = "2016-01-01T00:00:00Z"
+_ALPACA_BASIC_HISTORICAL_DELAY_MINUTES = 15
 
 
 def _load_runtime_settings(config: Path) -> Settings:
@@ -465,6 +468,63 @@ def _load_summary_event_rows(
     return selected_strikes, selected_signals, selected_positions
 
 
+def _build_regime_proxy_monthly_vol(
+    *,
+    storage: StorageManager,
+    settings: Settings,
+    start: pd.Timestamp | None,
+    end: pd.Timestamp | None,
+) -> dict[str, float]:
+    proxy_symbol = settings.validation.regime.proxy_symbol
+    proxy_timeframe = settings.validation.regime.proxy_timeframe
+    bars = storage.read_bars(
+        symbol=proxy_symbol,
+        timeframe=proxy_timeframe,
+        start=start,
+        end=end,
+    )
+    if bars.empty:
+        return {}
+
+    close_series = pd.to_numeric(bars["close"], errors="coerce")
+    if bool(close_series.isna().any()):
+        raise RuntimeError(
+            "Regime proxy bar contract violation: non-numeric close values for "
+            f"{proxy_symbol}/{proxy_timeframe}"
+        )
+
+    proxy_frame = pd.DataFrame(
+        {
+            "ts": pd.to_datetime(bars["ts"], utc=True),
+            "close_return": close_series.pct_change(),
+        }
+    ).dropna(subset=["close_return"])
+    if proxy_frame.empty:
+        return {}
+
+    for value in proxy_frame["close_return"]:
+        if not math.isfinite(float(value)):
+            raise RuntimeError(
+                "Regime proxy bar contract violation: non-finite pct_change(close) for "
+                f"{proxy_symbol}/{proxy_timeframe}"
+            )
+
+    proxy_frame["month_key"] = proxy_frame["ts"].dt.strftime("%Y-%m")
+    month_std = proxy_frame.groupby("month_key", sort=True)["close_return"].std()
+    regime_proxy_monthly_vol: dict[str, float] = {}
+    for month, raw_value in month_std.items():
+        if pd.isna(raw_value):
+            continue
+        candidate = float(raw_value)
+        if not math.isfinite(candidate):
+            raise RuntimeError(
+                "Regime proxy bar contract violation: monthly volatility must be finite for "
+                f"{proxy_symbol}/{proxy_timeframe} month={month}"
+            )
+        regime_proxy_monthly_vol[str(month)] = candidate
+    return regime_proxy_monthly_vol
+
+
 @app.command("validate-config")
 def validate_config(
     config: Path = typer.Option(
@@ -499,7 +559,7 @@ def discover_range(
         help="Output manifest path",
     ),
     start: str = typer.Option(
-        "2000-01-01T00:00:00Z",
+        _ALPACA_BASIC_HISTORICAL_START_UTC,
         "--start",
         help="UTC discovery start bound",
     ),
@@ -523,7 +583,14 @@ def discover_range(
     )
     stock_symbols = _stock_symbols_only(selected_symbols, universe.symbol_markets)
     start_ts = ensure_utc_timestamp(start)
-    end_ts = ensure_utc_timestamp(end) if end is not None else pd.Timestamp.now(tz="UTC")
+    end_ts = (
+        ensure_utc_timestamp(end)
+        if end is not None
+        else (
+            pd.Timestamp.now(tz="UTC")
+            - pd.Timedelta(minutes=_ALPACA_BASIC_HISTORICAL_DELAY_MINUTES)
+        )
+    )
     if start_ts >= end_ts:
         raise ValueError("start must be earlier than end for discover-range")
 
@@ -818,6 +885,12 @@ def replay(
         timeframes=selected_timeframes,
         progress_callback=_on_progress if progress else None,
     )
+    regime_proxy_monthly_vol = _build_regime_proxy_monthly_vol(
+        storage=storage,
+        settings=settings,
+        start=start_ts,
+        end=end_ts,
+    )
     summary = build_summary_from_records(
         strike_rows=[event_to_record(event) for event in result.strikes],
         signal_rows=[event_to_record(event) for event in result.signals],
@@ -827,6 +900,7 @@ def replay(
         validation=settings.validation,
         execution_costs=settings.execution_costs,
         citations=settings.citations,
+        regime_proxy_monthly_vol=regime_proxy_monthly_vol,
     )
     if progress_bar is not None:
         progress_bar.close()
@@ -1044,6 +1118,12 @@ def verify_readiness(
         start=start_ts,
         end=end_ts,
     )
+    regime_proxy_monthly_vol = _build_regime_proxy_monthly_vol(
+        storage=storage,
+        settings=settings,
+        start=start_ts,
+        end=end_ts,
+    )
     summary = build_summary_from_records(
         strike_rows=strikes,
         signal_rows=signals,
@@ -1053,6 +1133,7 @@ def verify_readiness(
         validation=settings.validation,
         execution_costs=settings.execution_costs,
         citations=settings.citations,
+        regime_proxy_monthly_vol=regime_proxy_monthly_vol,
     )
     academic_validation = summary.get("academic_validation")
     if not isinstance(academic_validation, dict):
@@ -1134,6 +1215,7 @@ def verify_readiness(
             "blocking_reasons": academic_blocking_reasons,
             "fold_count": int(academic_validation.get("fold_count", 0)),
             "min_fold_trade_count": int(academic_validation.get("min_fold_trade_count", 0)),
+            "wfo_feasibility": academic_validation.get("wfo_feasibility", {}),
             "bootstrap_p_value": academic_validation.get("bootstrap_p_value"),
             "fdr_summary": academic_validation.get("fdr_summary", {}),
         },
@@ -1165,6 +1247,12 @@ def report(
         start=start_ts,
         end=end_ts,
     )
+    regime_proxy_monthly_vol = _build_regime_proxy_monthly_vol(
+        storage=storage,
+        settings=settings,
+        start=start_ts,
+        end=end_ts,
+    )
     summary = build_summary_from_records(
         strike_rows=strikes,
         signal_rows=signals,
@@ -1174,6 +1262,7 @@ def report(
         validation=settings.validation,
         execution_costs=settings.execution_costs,
         citations=settings.citations,
+        regime_proxy_monthly_vol=regime_proxy_monthly_vol,
     )
     label = (
         f"{start_ts.strftime('%Y%m%d')}_{end_ts.strftime('%Y%m%d')}"

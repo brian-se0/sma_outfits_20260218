@@ -43,6 +43,7 @@ def build_academic_validation_payload(
     validation: ValidationConfig,
     citations: CitationsConfig,
     execution_realism_overlay: dict[str, Any],
+    regime_proxy_monthly_vol: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     citations_payload = _load_and_validate_citations(Path(citations.pack_path))
     alignment_rules = _load_alignment_rules(Path(validation.author_alignment_rules_path))
@@ -68,6 +69,10 @@ def build_academic_validation_payload(
         gate_signal_values=gate_signal_values,
     )
 
+    wfo_feasibility = _wfo_feasibility_summary(
+        net_scoped_outcomes=net_scoped_outcomes,
+        validation=validation,
+    )
     wfo_folds = _build_wfo_folds(net_scoped_outcomes=net_scoped_outcomes, validation=validation)
     wfo_aggregate = _aggregate_wfo(folds=wfo_folds, validation=validation)
     oos_values = [float(row["net_realized_r"]) for row in net_scoped_outcomes]
@@ -86,6 +91,7 @@ def build_academic_validation_payload(
         net_scoped_outcomes=net_scoped_outcomes,
         proxy_symbol=validation.regime.proxy_symbol,
         require_positive_mean_in_each=validation.regime.require_positive_mean_in_each,
+        regime_proxy_monthly_vol=regime_proxy_monthly_vol,
     )
     random_strategy_mc = _random_strategy_mc_summary(
         values=oos_values,
@@ -141,6 +147,8 @@ def build_academic_validation_payload(
         blocking_reasons.append(
             f"wfo_fold_count_below_minimum:{fold_count}<{validation.wfo.min_folds}"
         )
+    if not bool(wfo_feasibility.get("is_feasible", False)):
+        blocking_reasons.append("wfo_window_infeasible_for_config")
     if min_fold_trade_count < validation.wfo.min_closed_trades_per_fold:
         blocking_reasons.append(
             "wfo_min_closed_trades_per_fold_violation:"
@@ -191,6 +199,7 @@ def build_academic_validation_payload(
             "max_q_value": pvalues.get("max_q_value"),
         },
         "wfo_folds": wfo_folds,
+        "wfo_feasibility": wfo_feasibility,
         "wfo_aggregate": wfo_aggregate,
         "bootstrap": bootstrap,
         "pvalues": pvalues,
@@ -288,6 +297,41 @@ def _apply_net_realized_r(
             }
         )
     return output
+
+
+def _wfo_feasibility_summary(
+    *,
+    net_scoped_outcomes: list[dict[str, Any]],
+    validation: ValidationConfig,
+) -> dict[str, Any]:
+    close_ts = [
+        ensure_utc_timestamp(str(row["close_ts"]))
+        for row in net_scoped_outcomes
+        if row.get("close_ts") is not None
+    ]
+    if not close_ts:
+        available_months = 0
+    else:
+        first = min(close_ts)
+        last = max(close_ts)
+        available_months = ((last.year - first.year) * 12) + (last.month - first.month) + 1
+
+    min_window_months = validation.wfo.train_months + validation.wfo.test_months
+    required_months_for_min_folds = (
+        min_window_months + (validation.wfo.min_folds - 1) * validation.wfo.step_months
+    )
+    max_feasible_folds = 0
+    if available_months >= min_window_months:
+        max_feasible_folds = (
+            (available_months - min_window_months) // validation.wfo.step_months
+        ) + 1
+
+    return {
+        "available_months": available_months,
+        "required_months_for_min_folds": required_months_for_min_folds,
+        "max_feasible_folds": max_feasible_folds,
+        "is_feasible": max_feasible_folds >= validation.wfo.min_folds,
+    }
 
 
 def _build_wfo_folds(
@@ -500,44 +544,69 @@ def _regime_stability_summary(
     net_scoped_outcomes: list[dict[str, Any]],
     proxy_symbol: str,
     require_positive_mean_in_each: bool,
+    regime_proxy_monthly_vol: dict[str, float] | None,
 ) -> dict[str, Any]:
-    if not net_scoped_outcomes:
-        return {
-            "proxy_symbol": proxy_symbol,
-            "high_vol_count": 0,
-            "low_vol_count": 0,
-            "high_vol_mean_r": 0.0,
-            "low_vol_mean_r": 0.0,
-            "missing_proxy_month_count": 0,
-            "passes_requirement": False,
-            "blocking_reasons": ["no_scoped_outcomes"],
-        }
-
-    proxy_month_abs: dict[str, list[float]] = defaultdict(list)
-    all_rows: list[tuple[str, float]] = []
+    trade_rows: list[tuple[str, float]] = []
     for row in net_scoped_outcomes:
         close_ts = row.get("close_ts")
         if close_ts is None:
             continue
         month_key = ensure_utc_timestamp(str(close_ts)).strftime("%Y-%m")
-        net_r = float(row["net_realized_r"])
-        all_rows.append((month_key, net_r))
-        if str(row.get("symbol", "")).upper() == proxy_symbol:
-            proxy_month_abs[month_key].append(abs(net_r))
+        trade_rows.append((month_key, float(row["net_realized_r"])))
+    trade_months = {month for month, _value in trade_rows}
 
-    if not proxy_month_abs:
+    if not net_scoped_outcomes:
         return {
             "proxy_symbol": proxy_symbol,
+            "proxy_month_count": 0,
+            "mapped_trade_month_count": 0,
+            "missing_proxy_month_count": 0,
             "high_vol_count": 0,
             "low_vol_count": 0,
             "high_vol_mean_r": 0.0,
             "low_vol_mean_r": 0.0,
-            "missing_proxy_month_count": len({month for month, _ in all_rows}),
             "passes_requirement": False,
-            "blocking_reasons": ["proxy_symbol_outcomes_missing"],
+            "blocking_reasons": ["no_scoped_outcomes"],
         }
 
-    proxy_scores = {month: float(np.mean(values)) for month, values in proxy_month_abs.items()}
+    if regime_proxy_monthly_vol is None or len(regime_proxy_monthly_vol) == 0:
+        return {
+            "proxy_symbol": proxy_symbol,
+            "proxy_month_count": 0,
+            "mapped_trade_month_count": 0,
+            "missing_proxy_month_count": len(trade_months),
+            "high_vol_count": 0,
+            "low_vol_count": 0,
+            "high_vol_mean_r": 0.0,
+            "low_vol_mean_r": 0.0,
+            "passes_requirement": False,
+            "blocking_reasons": ["regime_proxy_monthly_vol_missing"],
+        }
+
+    proxy_scores: dict[str, float] = {}
+    for month, raw_value in regime_proxy_monthly_vol.items():
+        candidate = float(raw_value)
+        if not math.isfinite(candidate):
+            raise RuntimeError(
+                "Regime stability contract violation: proxy month volatility must be finite, "
+                f"got {raw_value!r} for month '{month}'"
+            )
+        proxy_scores[str(month)] = candidate
+
+    if not proxy_scores:
+        return {
+            "proxy_symbol": proxy_symbol,
+            "proxy_month_count": 0,
+            "mapped_trade_month_count": 0,
+            "missing_proxy_month_count": len(trade_months),
+            "high_vol_count": 0,
+            "low_vol_count": 0,
+            "high_vol_mean_r": 0.0,
+            "low_vol_mean_r": 0.0,
+            "passes_requirement": False,
+            "blocking_reasons": ["regime_proxy_monthly_vol_missing"],
+        }
+
     threshold = float(np.median(np.array(list(proxy_scores.values()), dtype=float)))
     high_months = {month for month, value in proxy_scores.items() if value >= threshold}
     low_months = {month for month, value in proxy_scores.items() if value < threshold}
@@ -545,7 +614,7 @@ def _regime_stability_summary(
     high_values: list[float] = []
     low_values: list[float] = []
     missing_proxy_months: set[str] = set()
-    for month, value in all_rows:
+    for month, value in trade_rows:
         if month in high_months:
             high_values.append(value)
         elif month in low_months:
@@ -573,6 +642,7 @@ def _regime_stability_summary(
     return {
         "proxy_symbol": proxy_symbol,
         "proxy_month_count": len(proxy_scores),
+        "mapped_trade_month_count": len(trade_months) - len(missing_proxy_months),
         "proxy_high_vol_threshold": threshold,
         "high_vol_count": len(high_values),
         "low_vol_count": len(low_values),

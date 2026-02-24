@@ -337,10 +337,16 @@ def test_write_summary_report_both_mode_adds_close_columns_and_sections(tmp_path
     assert "Close-Time Attribution" in markdown
     assert "Academic Validation Appendix" in markdown
     assert "Walk-Forward Optimization (WFO)" in markdown
+    assert "available_months" in markdown
+    assert "required_months_for_min_folds" in markdown
+    assert "max_feasible_folds" in markdown
+    assert "is_feasible" in markdown
     assert "Bootstrap Distribution" in markdown
     assert "P-Value and Multiple-Testing Summary" in markdown
     assert "Execution Realism Sensitivity" in markdown
     assert "Regime Stability" in markdown
+    assert "mapped_trade_month_count" in markdown
+    assert "missing_proxy_month_count" in markdown
     assert "Citation Pack" in markdown
     assert "white_2000_reality_check" in markdown
 

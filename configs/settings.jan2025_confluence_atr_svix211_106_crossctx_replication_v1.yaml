@@ -119,7 +119,7 @@ strategy:
   price_basis: ohlc4
   trigger_mode: close_touch_or_cross
   strict_routing: true
-  allow_same_bar_exit: false
+  allow_same_bar_exit: true
   ambiguity_policy: fail
   routes:
     - id: qqq_1h_author
@@ -191,6 +191,15 @@ strategy:
       atr:
         period: 14
         multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author
+            require_macro_positive: true
+            require_micro_positive: true
+          - reference_route_id: smh_2h_author
+            require_macro_positive: true
+            require_micro_positive: true
     - id: sqqq_30m_author
       symbol: SQQQ
       timeframe: 30m
@@ -218,6 +227,9 @@ strategy:
           - reference_route_id: qqq_1h_author
             require_macro_positive: false
             require_micro_positive: false
+          - reference_route_id: smh_2h_author
+            require_macro_positive: false
+            require_micro_positive: false
     - id: tqqq_30m_author
       symbol: TQQQ
       timeframe: 30m
@@ -239,6 +251,15 @@ strategy:
       atr:
         period: 14
         multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author
+            require_macro_positive: true
+            require_micro_positive: true
+          - reference_route_id: smh_2h_author
+            require_macro_positive: true
+            require_micro_positive: true
     - id: iwm_30m_author
       symbol: IWM
       timeframe: 30m
@@ -281,14 +302,23 @@ strategy:
       atr:
         period: 14
         multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author
+            require_macro_positive: true
+            require_micro_positive: true
+          - reference_route_id: smh_2h_author
+            require_macro_positive: true
+            require_micro_positive: true
     - id: soxl_30m_author
       symbol: SOXL
       timeframe: 30m
-      outfit_id: svix_211_106
-      key_period: 844
+      outfit_id: warings_problem
+      key_period: 548
       side: LONG
       signal_type: magnetized_buy
-      micro_periods: [26, 52, 106, 211, 422]
+      micro_periods: [19, 37, 73, 143, 279]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
       risk_mode: penny_reference_break
@@ -296,12 +326,21 @@ strategy:
       dynamic_reference_migration: true
       confluence:
         enabled: true
-        min_outfit_alignment_count: 3
+        min_outfit_alignment_count: 2
         volume_lookback_bars: 20
-        volume_spike_ratio: 1.5
+        volume_spike_ratio: 1.2
       atr:
         period: 14
         multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author
+            require_macro_positive: true
+            require_micro_positive: true
+          - reference_route_id: smh_2h_author
+            require_macro_positive: true
+            require_micro_positive: true
     - id: spy_30m_author
       symbol: SPY
       timeframe: 30m
@@ -323,6 +362,15 @@ strategy:
       atr:
         period: 14
         multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author
+            require_macro_positive: true
+            require_micro_positive: true
+          - reference_route_id: smh_2h_author
+            require_macro_positive: true
+            require_micro_positive: true
     - id: upro_30m_author
       symbol: UPRO
       timeframe: 30m
@@ -369,15 +417,137 @@ strategy:
         enabled: true
         rules:
           - reference_route_id: qqq_1h_author
+            require_macro_positive: true
+            require_micro_positive: true
+          - reference_route_id: smh_2h_author
+            require_macro_positive: true
+            require_micro_positive: true
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author
+            require_macro_positive: true
+            require_micro_positive: true
+          - reference_route_id: smh_2h_author
+            require_macro_positive: true
+            require_micro_positive: true
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author
             require_macro_positive: false
             require_micro_positive: false
+          - reference_route_id: smh_2h_author
+            require_macro_positive: false
+            require_micro_positive: false
+    - id: xlf_2h_author
+      symbol: XLF
+      timeframe: 2h
+      outfit_id: warings_problem
+      key_period: 548
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [19, 37, 73, 143, 279]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 2
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.2
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author
+            require_macro_positive: false
+            require_micro_positive: false
+    - id: smh_2h_author
+      symbol: SMH
+      timeframe: 2h
+      outfit_id: warings_problem
+      key_period: 548
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [19, 37, 73, 143, 279]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 2
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.2
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author
+            require_macro_positive: false
+            require_micro_positive: false
+    - id: soxl_1h_author
+      symbol: SOXL
+      timeframe: 1h
+      outfit_id: warings_problem
+      key_period: 548
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [19, 37, 73, 143, 279]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 2
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.2
+      atr:
+        period: 14
+        multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author
+            require_macro_positive: true
+            require_micro_positive: true
+          - reference_route_id: smh_2h_author
+            require_macro_positive: true
+            require_micro_positive: true
+    - id: soxl_2h_author
+      symbol: SOXL
+      timeframe: 2h
+      outfit_id: warings_problem
+      key_period: 548
+      side: LONG
+      signal_type: magnetized_buy
+      micro_periods: [19, 37, 73, 143, 279]
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 2
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.2
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: smh_2h_author
+            require_macro_positive: true
+            require_micro_positive: true
 
 risk:
   long_break: 0.01
   short_break: 0.01
   partial_take_r: 1.0
   final_take_r: 3.0
-  timeout_bars: 120
+  timeout_bars: 240
   risk_dollar_per_trade: 1.0
   migrations:
     AMDL:
@@ -417,17 +587,17 @@ outfits_path: src/sma_outfits/config/outfits.yaml
 
 
 validation:
-  scope_symbols: [RWM, SPY, TQQQ, SQQQ, SVIX, VIXY, IWM, XLF, SOXL, UPRO]
+  scope_symbols: [QQQ, SPY, TQQQ, SQQQ, SVIX, VIXY, XLF, SMH, SOXL]
   wfo:
-    train_months: 23
-    test_months: 12
+    train_months: 24
+    test_months: 6
     step_months: 6
     min_folds: 3
-    min_closed_trades_per_fold: 14
+    min_closed_trades_per_fold: 10
   thresholds:
     oos_sharpe_min: 1.5
     oos_calmar_min: 2.0
-    bootstrap_pvalue_max: 0.06
+    bootstrap_pvalue_max: 0.05
     fdr_qvalue_max: 0.05
     replication_score_min: 0.7
   bootstrap:
@@ -438,6 +608,7 @@ validation:
     method: fdr_bh
   regime:
     proxy_symbol: VIXY
+    proxy_timeframe: 1h
     require_positive_mean_in_each: true
   random_strategy_mc_samples: 10000
   seed: 42

@@ -90,6 +90,7 @@ def build_summary_from_records(
     validation: ValidationConfig | None = None,
     execution_costs: ExecutionCostsConfig | None = None,
     citations: CitationsConfig | None = None,
+    regime_proxy_monthly_vol: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     strikes = [_record_to_strike(row) for row in strike_rows]
     signals = [_record_to_signal(row) for row in signal_rows]
@@ -130,6 +131,7 @@ def build_summary_from_records(
         validation=validation_config,
         citations=citations_config,
         execution_realism_overlay=execution_realism_overlay,
+        regime_proxy_monthly_vol=regime_proxy_monthly_vol,
     )
     execution_realism = public_execution_realism_payload(execution_realism_overlay)
 
@@ -543,6 +545,23 @@ def _render_academic_validation_appendix(
         "",
         "### Walk-Forward Optimization (WFO)",
     ]
+    wfo_feasibility = academic_validation.get("wfo_feasibility", {})
+    if not isinstance(wfo_feasibility, dict):
+        raise RuntimeError(
+            "Summary contract violation: academic_validation.wfo_feasibility must be a dict"
+        )
+    output.extend(
+        [
+            f"- available_months: `{wfo_feasibility.get('available_months', 0)}`",
+            "- required_months_for_min_folds: `{}`".format(
+                wfo_feasibility.get("required_months_for_min_folds", 0)
+            ),
+            f"- max_feasible_folds: `{wfo_feasibility.get('max_feasible_folds', 0)}`",
+            f"- is_feasible: `{wfo_feasibility.get('is_feasible', False)}`",
+            "",
+            "#### WFO Fold Table",
+        ]
+    )
     wfo_rows = academic_validation.get("wfo_folds", [])
     if not isinstance(wfo_rows, list):
         raise RuntimeError(
@@ -662,6 +681,9 @@ def _render_academic_validation_appendix(
             "",
             "### Regime Stability",
             f"- proxy_symbol: `{regime_payload.get('proxy_symbol', '')}`",
+            f"- proxy_month_count: `{regime_payload.get('proxy_month_count', 0)}`",
+            f"- mapped_trade_month_count: `{regime_payload.get('mapped_trade_month_count', 0)}`",
+            f"- missing_proxy_month_count: `{regime_payload.get('missing_proxy_month_count', 0)}`",
             f"- high_vol_count: `{regime_payload.get('high_vol_count', 0)}`",
             f"- low_vol_count: `{regime_payload.get('low_vol_count', 0)}`",
             f"- high_vol_mean_r: `{regime_payload.get('high_vol_mean_r', 0.0)}`",

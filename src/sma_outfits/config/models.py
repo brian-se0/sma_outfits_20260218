@@ -654,6 +654,7 @@ class ValidationRegimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     proxy_symbol: str = "VIXY"
+    proxy_timeframe: str = "1h"
     require_positive_mean_in_each: bool = True
 
     @field_validator("proxy_symbol")
@@ -662,6 +663,17 @@ class ValidationRegimeConfig(BaseModel):
         candidate = value.strip().upper()
         if not candidate:
             raise ValueError("validation.regime.proxy_symbol must be non-empty")
+        return candidate
+
+    @field_validator("proxy_timeframe")
+    @classmethod
+    def _validate_proxy_timeframe(cls, value: str) -> str:
+        candidate = value.strip()
+        if candidate not in SUPPORTED_TIMEFRAMES:
+            raise ValueError(
+                "Unsupported validation.regime.proxy_timeframe '{}'.".format(candidate)
+                + f" Supported: {SUPPORTED_TIMEFRAMES}"
+            )
         return candidate
 
 

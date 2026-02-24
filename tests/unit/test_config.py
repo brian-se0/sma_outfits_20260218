@@ -992,3 +992,53 @@ def test_missing_citation_pack_path_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError, match="Citations pack not found"):
         load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_validation_regime_proxy_timeframe_accepts_supported_value(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"validation": {"regime": {"proxy_timeframe": "2h"}}}),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path=config_path, env_path=env_path)
+    assert settings.validation.regime.proxy_timeframe == "2h"
+
+
+def test_validation_regime_proxy_timeframe_rejects_unsupported_value(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"validation": {"regime": {"proxy_timeframe": "13m"}}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Unsupported validation.regime.proxy_timeframe"):
+        load_settings(config_path=config_path, env_path=env_path)

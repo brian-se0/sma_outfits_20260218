@@ -12,6 +12,8 @@ This file documents the Make targets that remain in this repository and the flag
 | `make validate-config` | Validate config schema and settings. | `CONFIG` |
 | `make discover-range` | Discover earliest available bars and write readiness range manifest. | `CONFIG`, `SYMBOLS`, `TIMEFRAMES`, `UNIVERSE`, `TIMEFRAME_SET`, `DISCOVER_START`, `READINESS_END`, `DISCOVER_RANGE_OUTPUT` |
 | `make verify-readiness` | Verify readiness acceptance checks and write JSON summary. | `CONFIG`, `START`, `END`, `SYMBOLS`, `TIMEFRAMES`, `UNIVERSE`, `TIMEFRAME_SET`, `READINESS_ACCEPTANCE_OUTPUT` |
+| `make prove-edge` | Strict canonical lane: run `e2e` then `verify-readiness` with academic gate. | `PROVEN_EDGE_SYMBOLS`, `PROVEN_EDGE_TIMEFRAMES`, `VALIDATION_CONFIG_OVERRIDE`, plus standard `PROFILE`/range flags |
+| `make prove-edge-replication` | Replication lane: discover full-range start, run `e2e`, then readiness gate with replication profile defaults. | `REPLICATION_CONFIG`, `REPLICATION_SYMBOLS`, `REPLICATION_TIMEFRAMES`, `REPLICATION_DISCOVER_OUTPUT`, `REPLICATION_END`, `WARMUP_DAYS` |
 | `make test` | Run the test suite. | None |
 | `make dead-code-check` | Run dead-code gate via `vulture`. | None |
 | `make backfill` | Backfill bars for selected symbols/timeframes/date range. | `CONFIG`, `START`, `END`, `SYMBOLS`, `TIMEFRAMES`, `UNIVERSE`, `TIMEFRAME_SET`, `PROFILE` |
@@ -42,8 +44,10 @@ This file documents the Make targets that remain in this repository and the flag
 
 - `START`: Start timestamp (`YYYY-MM-DDTHH:MM:SSZ`).
 - `END`: End timestamp (`YYYY-MM-DDTHH:MM:SSZ`).
-- `MAX_START`: Default start for `PROFILE=max`. Default: `2016-01-01T00:00:00Z`.
-- `MAX_END`: Default end for `PROFILE=max`. Default: current UTC at runtime.
+- `ALPACA_BASIC_HISTORICAL_START`: Free-tier historical start anchor. Default: `2016-01-01T00:00:00Z`.
+- `ALPACA_BASIC_HISTORICAL_DELAY_MINUTES`: Free-tier historical delay offset. Default: `15`.
+- `MAX_START`: Default start for `PROFILE=max`. Default: `ALPACA_BASIC_HISTORICAL_START`.
+- `MAX_END`: Default end for `PROFILE=max`. Default: current UTC minus `ALPACA_BASIC_HISTORICAL_DELAY_MINUTES`.
 - `ANALYSIS_START`: Analysis/report window start for `e2e`. Default: `START`.
 - `ANALYSIS_END`: Analysis/report window end for `e2e`. Default: `END`.
 - `WARMUP_DAYS`: Warmup days subtracted from `ANALYSIS_START` to derive warmup start. Default: `120`.
@@ -62,11 +66,19 @@ This file documents the Make targets that remain in this repository and the flag
 
 ### Readiness-specific flags
 
-- `DISCOVER_START`: Earliest probe start used by `discover-range`. Default: `2000-01-01T00:00:00Z`.
+- `DISCOVER_START`: Earliest probe start used by `discover-range`. Default: `ALPACA_BASIC_HISTORICAL_START`.
 - `READINESS_END`: End timestamp used in readiness runs. Default: `MAX_END`.
 - `DISCOVER_RANGE_OUTPUT`: Output JSON path for `discover-range`. Default: `artifacts/readiness/discovered_range_manifest.json`.
 - `READINESS_ACCEPTANCE_OUTPUT`: Output JSON path for `verify-readiness`. Default: `artifacts/readiness/readiness_acceptance.json`.
 - `FULL_RANGE_START`: Convenience variable auto-read from `DISCOVER_RANGE_OUTPUT.full_range_start` when present.
+- `PROVEN_EDGE_SYMBOLS`: Scope symbols for `make prove-edge`. Default: `QQQ,SPY,TQQQ,SQQQ,SVIX,VIXY`.
+- `PROVEN_EDGE_TIMEFRAMES`: Scope timeframes for `make prove-edge`. Default: `30m,1h`.
+- `VALIDATION_CONFIG_OVERRIDE`: Optional strict-lane config override consumed by `PROVEN_EDGE_CONFIG`.
+- `REPLICATION_CONFIG`: Config for `make prove-edge-replication`. Default: `configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml`.
+- `REPLICATION_SYMBOLS`: Replication lane symbols. Default: `QQQ,SPY,TQQQ,SQQQ,SVIX,VIXY,XLF,SMH,SOXL`.
+- `REPLICATION_TIMEFRAMES`: Replication lane timeframes. Default: `30m,1h,2h`.
+- `REPLICATION_DISCOVER_OUTPUT`: Replication discover manifest path. Default: `artifacts/readiness/discovered_range_replication.json`.
+- `REPLICATION_END`: Replication lane end timestamp. Default: `READINESS_END`.
 
 ### Storage safety
 
