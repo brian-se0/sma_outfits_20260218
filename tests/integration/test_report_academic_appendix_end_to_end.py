@@ -96,7 +96,7 @@ def test_report_writes_academic_appendix_sidecars(settings, monkeypatch) -> None
     )
 
     cli.report(
-        config=Path("configs/settings.example.yaml"),
+        config=Path("configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"),
         date=None,
         range_="2025-01-02T00:00:00Z,2025-01-02T23:59:59Z",
     )
@@ -113,3 +113,4 @@ def test_report_writes_academic_appendix_sidecars(settings, monkeypatch) -> None
     assert (report_root / f"{label}_pvalues.csv").exists()
     assert (report_root / f"{label}_bootstrap_bins.csv").exists()
     assert (report_root / "figures" / f"{label}_bootstrap_hist.png").exists()
+

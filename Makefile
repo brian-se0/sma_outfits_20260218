@@ -4,7 +4,16 @@ PIP := $(PYTHON) -m pip
 INSTALL_STAMP := $(VENV)\.install.stamp
 INSTALL_DEPS := pyproject.toml
 
-CONFIG ?= configs/settings.example.yaml## help: Config path (YAML).
+STRICT_CONFIG_PATH ?= configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml## help: Strict canonical config path.
+REPLICATION_CONFIG_PATH ?= configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml## help: Replication canonical config path.
+CONFIG_PROFILE ?= strict## help: Config profile selector (strict|replication).
+ifeq ($(CONFIG_PROFILE),strict)
+ACTIVE_CONFIG := $(STRICT_CONFIG_PATH)
+else ifeq ($(CONFIG_PROFILE),replication)
+ACTIVE_CONFIG := $(REPLICATION_CONFIG_PATH)
+else
+$(error Unsupported CONFIG_PROFILE='$(CONFIG_PROFILE)'. Use: strict, replication)
+endif
 
 # e2e flag-driven defaults
 # Usage examples:
@@ -20,7 +29,6 @@ PROFILE ?= smoke## help: Range profile (smoke|day|week|month|max|custom).
 UNIVERSE ?= core## help: Symbol universe preset (core|core_expanded|all_stocks|all).
 TIMEFRAME_SET ?= core## help: Timeframe preset (core|all).
 STAGES ?= validate-config,backfill,replay,report## help: e2e stages CSV subset of validate-config,backfill,replay,report.
-LANE ?= strict## help: Lane selector for make lane (strict|replication).
 CORE_EXPANDED_SYMBOLS := QQQ,RWM,SVIX,SQQQ,TQQQ,IWM,XLF,SOXL,SPY,UPRO,VIXY
 ALL_STOCK_SYMBOLS := AAPL,AMDL,CONL,DUST,ETHU,IYR,MUU,NVD,NVDX,SPXU,SPY,QQQ,DIA,TNA,UPRO,TQQQ,TSLL,TSLT,TZA,SQQQ,UDOW,SDOW,SOXL,SOXS,SVIX,VIXY,XLF,JPM,NVDA,TSLA,AMD,GME,RWM,IWM,SMH,FAS,FAZ
 
@@ -59,20 +67,6 @@ ifeq ($(strip $(FULL_RANGE_START)),)
 FULL_RANGE_START := $(FULL_RANGE_START_COMPUTED)
 endif
 VERIFY_READINESS_ARGS ?=## help: Extra verify-readiness CLI args (for example --require-academic-validation).
-LANE_STRICT_SYMBOLS ?= QQQ,SPY,TQQQ,SQQQ,SVIX,VIXY## help: Strict lane symbols CSV.
-LANE_STRICT_TIMEFRAMES ?= 30m,1h## help: Strict lane timeframes CSV.
-LANE_STRICT_CONFIG_OVERRIDE ?=## help: Optional strict-lane config override.
-LANE_STRICT_CONFIG ?= $(if $(strip $(LANE_STRICT_CONFIG_OVERRIDE)),$(LANE_STRICT_CONFIG_OVERRIDE),$(CONFIG))
-LANE_REPLICATION_CONFIG ?= configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml## help: Replication lane config path.
-LANE_REPLICATION_SYMBOLS ?= QQQ,SPY,TQQQ,SQQQ,SVIX,VIXY,XLF,SMH,SOXL## help: Replication lane symbols CSV.
-LANE_REPLICATION_TIMEFRAMES ?= 30m,1h,2h## help: Replication lane timeframes CSV.
-LANE_REPLICATION_DISCOVER_OUTPUT ?= artifacts/readiness/discovered_range_replication.json## help: Replication discover manifest output path.
-LANE_STRICT_READINESS_OUTPUT ?= artifacts/readiness/strict/readiness_acceptance.json## help: Strict lane readiness output path.
-LANE_REPLICATION_READINESS_OUTPUT ?= artifacts/readiness/replication/readiness_acceptance.json## help: Replication lane readiness output path.
-LANE_REPLICATION_END ?=## help: Replication lane end timestamp (required for LANE=replication).
-LANE_REPLICATION_FULL_RANGE_START_COMPUTED = $(shell powershell -NoProfile -Command 'if (Test-Path "$(LANE_REPLICATION_DISCOVER_OUTPUT)") { $$payload = Get-Content -Path "$(LANE_REPLICATION_DISCOVER_OUTPUT)" -Raw | ConvertFrom-Json; $$value = $$payload.full_range_start; if ($$null -ne $$value) { if ($$value -is [datetime]) { $$value = $$value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }; [Console]::Out.Write([string]$$value) } }')
-LANE_REPLICATION_FULL_RANGE_START ?= $(LANE_REPLICATION_FULL_RANGE_START_COMPUTED)
-LANE_PIPELINE_STAGES := validate-config,backfill,replay,report
 
 ifeq ($(PROFILE),smoke)
 PROFILE_START := 2025-01-02T14:30:00Z
@@ -145,15 +139,6 @@ REPLAY_END ?= $(ANALYSIS_END)
 DEFAULT_REPORT_RANGE := $(ANALYSIS_START),$(ANALYSIS_END)
 REPORT_RANGE ?=## help: Report range as start,end (defaults to analysis window in e2e).
 REPORT_RANGE_FOR_E2E := $(if $(strip $(REPORT_RANGE)),$(REPORT_RANGE),$(DEFAULT_REPORT_RANGE))
-LANE_REPLICATION_ANALYSIS_START = $(LANE_REPLICATION_FULL_RANGE_START)
-LANE_REPLICATION_ANALYSIS_END = $(LANE_REPLICATION_END)
-LANE_REPLICATION_WARMUP_START = $(shell powershell -NoProfile -Command '$$start=[DateTimeOffset]::Parse("$(LANE_REPLICATION_ANALYSIS_START)"); $$days=[double]"$(WARMUP_DAYS)"; [Console]::Out.Write($$start.AddDays(-1.0 * $$days).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))')
-LANE_REPLICATION_BACKFILL_START ?= $(LANE_REPLICATION_WARMUP_START)
-LANE_REPLICATION_BACKFILL_END ?= $(LANE_REPLICATION_ANALYSIS_END)
-LANE_REPLICATION_REPLAY_START ?= $(LANE_REPLICATION_WARMUP_START)
-LANE_REPLICATION_REPLAY_END ?= $(LANE_REPLICATION_ANALYSIS_END)
-LANE_REPLICATION_DEFAULT_REPORT_RANGE = $(LANE_REPLICATION_ANALYSIS_START),$(LANE_REPLICATION_ANALYSIS_END)
-LANE_REPLICATION_REPORT_RANGE ?= $(if $(strip $(REPORT_RANGE)),$(REPORT_RANGE),$(LANE_REPLICATION_DEFAULT_REPORT_RANGE))
 
 SYMBOLS_ARG := $(if $(strip $(SYMBOLS)),--symbols $(SYMBOLS),)
 TIMEFRAMES_ARG := $(if $(strip $(TIMEFRAMES)),--timeframes $(TIMEFRAMES),)
@@ -176,53 +161,8 @@ define run_pipeline
 	powershell -NoProfile -Command "Write-Output 'e2e complete'"
 endef
 
-define set_pipe_blank_stage_overrides
-$(eval PIPE_BACKFILL_SYMBOLS :=)
-$(eval PIPE_BACKFILL_TIMEFRAMES :=)
-$(eval PIPE_REPLAY_SYMBOLS :=)
-$(eval PIPE_REPLAY_TIMEFRAMES :=)
-endef
-
-define set_pipe_context_lane_strict
-$(eval PIPE_CONFIG := $(LANE_STRICT_CONFIG))
-$(eval PIPE_PROFILE := $(PROFILE))
-$(eval PIPE_STAGES := $(LANE_PIPELINE_STAGES))
-$(eval PIPE_SYMBOLS := $(LANE_STRICT_SYMBOLS))
-$(eval PIPE_TIMEFRAMES := $(LANE_STRICT_TIMEFRAMES))
-$(call set_pipe_blank_stage_overrides)
-$(eval PIPE_ANALYSIS_START := $(ANALYSIS_START))
-$(eval PIPE_ANALYSIS_END := $(ANALYSIS_END))
-$(eval PIPE_WARMUP_DAYS := $(WARMUP_DAYS))
-$(eval PIPE_WARMUP_START := $(WARMUP_START))
-$(eval PIPE_BACKFILL_START := $(BACKFILL_START))
-$(eval PIPE_BACKFILL_END := $(BACKFILL_END))
-$(eval PIPE_REPLAY_START := $(REPLAY_START))
-$(eval PIPE_REPLAY_END := $(REPLAY_END))
-$(eval PIPE_REPORT_RANGE := $(REPORT_RANGE_FOR_E2E))
-$(eval PIPE_COMMAND := make lane LANE=strict)
-endef
-
-define set_pipe_context_lane_replication
-$(eval PIPE_CONFIG := $(LANE_REPLICATION_CONFIG))
-$(eval PIPE_PROFILE := custom)
-$(eval PIPE_STAGES := $(LANE_PIPELINE_STAGES))
-$(eval PIPE_SYMBOLS := $(LANE_REPLICATION_SYMBOLS))
-$(eval PIPE_TIMEFRAMES := $(LANE_REPLICATION_TIMEFRAMES))
-$(call set_pipe_blank_stage_overrides)
-$(eval PIPE_ANALYSIS_START := $(LANE_REPLICATION_ANALYSIS_START))
-$(eval PIPE_ANALYSIS_END := $(LANE_REPLICATION_ANALYSIS_END))
-$(eval PIPE_WARMUP_DAYS := $(WARMUP_DAYS))
-$(eval PIPE_WARMUP_START := $(LANE_REPLICATION_WARMUP_START))
-$(eval PIPE_BACKFILL_START := $(LANE_REPLICATION_BACKFILL_START))
-$(eval PIPE_BACKFILL_END := $(LANE_REPLICATION_BACKFILL_END))
-$(eval PIPE_REPLAY_START := $(LANE_REPLICATION_REPLAY_START))
-$(eval PIPE_REPLAY_END := $(LANE_REPLICATION_REPLAY_END))
-$(eval PIPE_REPORT_RANGE := $(LANE_REPLICATION_REPORT_RANGE))
-$(eval PIPE_COMMAND := make lane LANE=replication)
-endef
-
 define set_pipe_context_e2e
-$(eval PIPE_CONFIG := $(CONFIG))
+$(eval PIPE_CONFIG := $(ACTIVE_CONFIG))
 $(eval PIPE_PROFILE := $(PROFILE))
 $(eval PIPE_STAGES := $(STAGES_NORMALIZED))
 $(eval PIPE_SYMBOLS := $(SYMBOLS))
@@ -240,13 +180,13 @@ $(eval PIPE_BACKFILL_END := $(BACKFILL_END))
 $(eval PIPE_REPLAY_START := $(REPLAY_START))
 $(eval PIPE_REPLAY_END := $(REPLAY_END))
 $(eval PIPE_REPORT_RANGE := $(REPORT_RANGE_FOR_E2E))
-$(eval PIPE_COMMAND := make e2e)
+$(eval PIPE_COMMAND := make e2e CONFIG_PROFILE=$(CONFIG_PROFILE))
 endef
 
-.PHONY: help venv install lane validate-config discover-range verify-readiness test dead-code-check backfill replay run-live report migrate-storage-layout preflight-storage e2e clean clean-all
+.PHONY: help venv install validate-config discover-range verify-readiness test dead-code-check backfill replay run-live report migrate-storage-layout preflight-storage e2e clean clean-all
 
 help: ## Print available targets, common variables, and examples.
-	powershell -NoProfile -Command "$$lines = Get-Content -Path 'Makefile'; $$targets = @(); $$vars = @(); foreach ($$line in $$lines) { if ($$line -match '^(?<target>[A-Za-z0-9_.-]+):(?:[^#]|#(?!#))*## (?<desc>.+)$$') { if ($$matches.target -notlike '_*') { $$targets += [PSCustomObject]@{ key = $$matches.target; desc = $$matches.desc } } }; if ($$line -match '^(?<var>[A-Z][A-Z0-9_]*)\s*(?:\?|:|\+)?=\s*.*##\s*help:\s*(?<desc>.+)$$') { $$vars += [PSCustomObject]@{ key = $$matches.var; desc = $$matches.desc } } }; Write-Output 'Targets:'; foreach ($$entry in $$targets) { Write-Output ('  make ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Common variables:'; foreach ($$entry in $$vars) { Write-Output ('  ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Examples:'; $$examples = @('make discover-range CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml UNIVERSE=all_stocks TIMEFRAME_SET=all','make lane LANE=strict CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=month','make lane LANE=replication LANE_REPLICATION_CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml LANE_REPLICATION_END=2025-01-31T21:00:00Z','make migrate-storage-layout CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml','make e2e CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all STAGES=validate-config,backfill','make verify-readiness CONFIG=configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all'); foreach ($$e in $$examples) { Write-Output ('  ' + $$e) }"
+	powershell -NoProfile -Command "$$lines = Get-Content -Path 'Makefile'; $$targets = @(); $$vars = @(); foreach ($$line in $$lines) { if ($$line -match '^(?<target>[A-Za-z0-9_.-]+):(?:[^#]|#(?!#))*## (?<desc>.+)$$') { if ($$matches.target -notlike '_*') { $$targets += [PSCustomObject]@{ key = $$matches.target; desc = $$matches.desc } } }; if ($$line -match '^(?<var>[A-Z][A-Z0-9_]*)\s*(?:\?|:|\+)?=\s*.*##\s*help:\s*(?<desc>.+)$$') { $$vars += [PSCustomObject]@{ key = $$matches.var; desc = $$matches.desc } } }; Write-Output 'Targets:'; foreach ($$entry in $$targets) { Write-Output ('  make ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Common variables:'; foreach ($$entry in $$vars) { Write-Output ('  ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Examples:'; $$examples = @('make discover-range CONFIG_PROFILE=strict UNIVERSE=all_stocks TIMEFRAME_SET=all','make discover-range CONFIG_PROFILE=replication UNIVERSE=all_stocks TIMEFRAME_SET=all','make migrate-storage-layout CONFIG_PROFILE=strict','make e2e CONFIG_PROFILE=strict PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all STAGES=validate-config,backfill','make e2e CONFIG_PROFILE=replication PROFILE=month UNIVERSE=core_expanded TIMEFRAME_SET=core','make verify-readiness CONFIG_PROFILE=replication START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all'); foreach ($$e in $$examples) { Write-Output ('  ' + $$e) }"
 
 venv: ## Create/repair .venv and enforce Python 3.14.3.
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; if (!(Test-Path '$(PYTHON)')) { py -3.14 -m venv $(VENV) }; if (!(Test-Path '$(VENV)\\Scripts\\pip.exe')) { & '$(PYTHON)' -m ensurepip --upgrade --default-pip }"
@@ -259,31 +199,13 @@ $(INSTALL_STAMP): $(INSTALL_DEPS) | venv
 install: $(INSTALL_STAMP) ## Install project and dev dependencies into .venv.
 
 validate-config: install ## Validate config schema and runtime settings.
-	$(PYTHON) -m sma_outfits.cli validate-config --config $(CONFIG)
+	$(PYTHON) -m sma_outfits.cli validate-config --config $(ACTIVE_CONFIG)
 
 discover-range: install ## Discover earliest available data range and write manifest.
-	$(PYTHON) -m sma_outfits.cli discover-range --config $(CONFIG) $(SYMBOLS_ARG) $(TIMEFRAMES_ARG) --output $(DISCOVER_RANGE_OUTPUT) --start $(DISCOVER_START) --end $(READINESS_END)
+	$(PYTHON) -m sma_outfits.cli discover-range --config $(ACTIVE_CONFIG) $(SYMBOLS_ARG) $(TIMEFRAMES_ARG) --output $(DISCOVER_RANGE_OUTPUT) --start $(DISCOVER_START) --end $(READINESS_END)
 
 verify-readiness: install ## Run readiness acceptance checks and write JSON summary.
-	$(PYTHON) -m sma_outfits.cli verify-readiness --config $(CONFIG) --start $(START) --end $(END) $(SYMBOLS_ARG) $(TIMEFRAMES_ARG) --output $(READINESS_ACCEPTANCE_OUTPUT) $(VERIFY_READINESS_ARGS)
-
-lane: install ## Run validation lane workflow (LANE=strict|replication).
-ifeq ($(LANE),strict)
-	$(call run_storage_preflight,$(PROFILE))
-	$(call set_pipe_context_lane_strict)
-	$(call run_pipeline)
-	$(PYTHON) -m sma_outfits.cli verify-readiness --config $(LANE_STRICT_CONFIG) --start $(ANALYSIS_START) --end $(ANALYSIS_END) --symbols $(LANE_STRICT_SYMBOLS) --timeframes $(LANE_STRICT_TIMEFRAMES) --output $(LANE_STRICT_READINESS_OUTPUT) --require-academic-validation
-else ifeq ($(LANE),replication)
-	$(if $(strip $(LANE_REPLICATION_END)),,$(error LANE_REPLICATION_END must be set for lane replication (UTC timestamp, e.g. 2025-01-31T21:00:00Z)))
-	$(PYTHON) -m sma_outfits.cli discover-range --config $(LANE_REPLICATION_CONFIG) --symbols $(LANE_REPLICATION_SYMBOLS) --timeframes $(LANE_REPLICATION_TIMEFRAMES) --output $(LANE_REPLICATION_DISCOVER_OUTPUT) --start $(DISCOVER_START) --end $(LANE_REPLICATION_END)
-	powershell -NoProfile -Command "if ([string]::IsNullOrWhiteSpace('$(LANE_REPLICATION_FULL_RANGE_START)')) { throw 'Replication discover-range manifest missing full_range_start in $(LANE_REPLICATION_DISCOVER_OUTPUT)' }"
-	$(call run_storage_preflight,custom)
-	$(call set_pipe_context_lane_replication)
-	$(call run_pipeline)
-	$(PYTHON) -m sma_outfits.cli verify-readiness --config $(LANE_REPLICATION_CONFIG) --start $(LANE_REPLICATION_FULL_RANGE_START) --end $(LANE_REPLICATION_END) --symbols $(LANE_REPLICATION_SYMBOLS) --timeframes $(LANE_REPLICATION_TIMEFRAMES) --output $(LANE_REPLICATION_READINESS_OUTPUT) --require-academic-validation
-else
-$(error Unsupported LANE='$(LANE)'. Use: strict, replication)
-endif
+	$(PYTHON) -m sma_outfits.cli verify-readiness --config $(ACTIVE_CONFIG) --start $(START) --end $(END) $(SYMBOLS_ARG) $(TIMEFRAMES_ARG) --output $(READINESS_ACCEPTANCE_OUTPUT) $(VERIFY_READINESS_ARGS)
 
 test: install ## Run full test suite.
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp\\pytest' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; & '$(PYTHON)' -m pytest"
@@ -292,19 +214,19 @@ dead-code-check: install ## Run dead-code analysis gate.
 	$(PYTHON) -m vulture src --min-confidence 90 --ignore-names cls,settings_cls,init_settings,env_settings,file_secret_settings
 
 backfill: install ## Backfill selected symbols/timeframes over START..END.
-	$(PYTHON) -m sma_outfits.cli backfill --config $(CONFIG) $(BACKFILL_SYMBOLS_ARG) --start $(START) --end $(END) $(BACKFILL_TIMEFRAMES_ARG)
+	$(PYTHON) -m sma_outfits.cli backfill --config $(ACTIVE_CONFIG) $(BACKFILL_SYMBOLS_ARG) --start $(START) --end $(END) $(BACKFILL_TIMEFRAMES_ARG)
 
 replay: install ## Replay selected symbols/timeframes over START..END.
-	$(PYTHON) -m sma_outfits.cli replay --config $(CONFIG) --start $(START) --end $(END) $(REPLAY_SYMBOLS_ARG) $(REPLAY_TIMEFRAMES_ARG)
+	$(PYTHON) -m sma_outfits.cli replay --config $(ACTIVE_CONFIG) --start $(START) --end $(END) $(REPLAY_SYMBOLS_ARG) $(REPLAY_TIMEFRAMES_ARG)
 
 run-live: install ## Run live execution path.
-	$(PYTHON) -m sma_outfits.cli run-live --config $(CONFIG)
+	$(PYTHON) -m sma_outfits.cli run-live --config $(ACTIVE_CONFIG)
 
 report: install ## Build report artifacts (optionally with REPORT_RANGE).
-	$(PYTHON) -m sma_outfits.cli report --config $(CONFIG) $(if $(strip $(REPORT_RANGE)),--range $(REPORT_RANGE),)
+	$(PYTHON) -m sma_outfits.cli report --config $(ACTIVE_CONFIG) $(if $(strip $(REPORT_RANGE)),--range $(REPORT_RANGE),)
 
 migrate-storage-layout: install ## Migrate storage layout in non-dry-run mode.
-	$(PYTHON) -m sma_outfits.cli migrate-storage-layout --config $(CONFIG) --no-dry-run
+	$(PYTHON) -m sma_outfits.cli migrate-storage-layout --config $(ACTIVE_CONFIG) --no-dry-run
 
 preflight-storage: ## Check free disk space for heavier profile runs.
 	$(call run_storage_preflight,$(PROFILE))

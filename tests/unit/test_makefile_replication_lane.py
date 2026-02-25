@@ -3,24 +3,33 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_makefile_has_replication_lane_plumbing() -> None:
+def test_makefile_uses_profile_based_active_config_mapping() -> None:
     makefile = Path("Makefile").read_text(encoding="utf-8")
 
-    assert "lane: install ## Run validation lane workflow (LANE=strict|replication)." in makefile
-    assert "_lane-strict:" not in makefile
-    assert "_lane-replication:" not in makefile
-    assert "LANE_REPLICATION_CONFIG ?=" in makefile
-    assert "LANE_REPLICATION_SYMBOLS ?= QQQ,SPY,TQQQ,SQQQ,SVIX,VIXY,XLF,SMH,SOXL" in makefile
-    assert "LANE_REPLICATION_TIMEFRAMES ?=" in makefile
-    assert "LANE_REPLICATION_DISCOVER_OUTPUT ?=" in makefile
-    assert "LANE_REPLICATION_END ?=" in makefile
-    assert "LANE_REPLICATION_END_RESOLVED" not in makefile
-    assert "LANE_REPLICATION_END must be set for lane replication" in makefile
-    assert "$(PYTHON) -m sma_outfits.cli discover-range --config $(LANE_REPLICATION_CONFIG)" in makefile
-    assert "$(MAKE) e2e CONFIG=$(LANE_STRICT_CONFIG)" not in makefile
-    assert "$(MAKE) e2e CONFIG=$(LANE_REPLICATION_CONFIG) PROFILE=custom" not in makefile
-    assert "$(eval PIPE_CONFIG := $(LANE_STRICT_CONFIG))" in makefile
-    assert "$(eval PIPE_CONFIG := $(LANE_REPLICATION_CONFIG))" in makefile
-    assert "$(call run_pipeline)" in makefile
-    assert "$(PYTHON) -m sma_outfits.cli verify-readiness --config $(LANE_REPLICATION_CONFIG)" in makefile
-    assert "$(PYTHON) -m sma_outfits.cli verify-readiness --config $(LANE_STRICT_CONFIG)" in makefile
+    assert (
+        "STRICT_CONFIG_PATH ?= "
+        "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"
+    ) in makefile
+    assert (
+        "REPLICATION_CONFIG_PATH ?= "
+        "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml"
+    ) in makefile
+    assert "CONFIG_PROFILE ?= strict" in makefile
+    assert "ifeq ($(CONFIG_PROFILE),strict)" in makefile
+    assert "ACTIVE_CONFIG := $(STRICT_CONFIG_PATH)" in makefile
+    assert "else ifeq ($(CONFIG_PROFILE),replication)" in makefile
+    assert "ACTIVE_CONFIG := $(REPLICATION_CONFIG_PATH)" in makefile
+    assert "$(error Unsupported CONFIG_PROFILE='$(CONFIG_PROFILE)'. Use: strict, replication)" in makefile
+    assert "$(eval PIPE_CONFIG := $(ACTIVE_CONFIG))" in makefile
+    assert "$(eval PIPE_COMMAND := make e2e CONFIG_PROFILE=$(CONFIG_PROFILE))" in makefile
+
+
+def test_makefile_removes_lane_interface_artifacts() -> None:
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+
+    assert "CONFIG ?=" not in makefile
+    assert "lane:" not in makefile
+    assert "make lane" not in makefile
+    assert "LANE ?=" not in makefile
+    assert "LANE_" not in makefile
+    assert "--config $(ACTIVE_CONFIG)" in makefile

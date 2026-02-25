@@ -162,7 +162,7 @@ def test_verify_readiness_fails_academic_gate_with_insufficient_edge(
 
     with pytest.raises(RuntimeError, match="academic validation gate failed"):
         cli.verify_readiness(
-            config=Path("configs/settings.example.yaml"),
+            config=Path("configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"),
             start="2020-01-02T14:30:00Z",
             end="2024-12-31T21:00:00Z",
             symbols="",
@@ -206,7 +206,7 @@ def test_verify_readiness_passes_academic_gate_with_strict_fixture_data(
 
     output_path = tmp_path / "readiness_acceptance.json"
     cli.verify_readiness(
-        config=Path("configs/settings.example.yaml"),
+        config=Path("configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"),
         start="2018-01-02T14:30:00Z",
         end="2025-12-31T21:00:00Z",
         symbols="",
@@ -221,3 +221,4 @@ def test_verify_readiness_passes_academic_gate_with_strict_fixture_data(
     assert output_path.exists()
     manifest = json.loads(output_path.read_text(encoding="utf-8"))
     assert manifest["academic_validation"]["ready"] is True
+

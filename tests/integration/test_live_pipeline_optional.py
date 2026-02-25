@@ -21,7 +21,7 @@ def test_optional_alpaca_live_stream_one_hour() -> None:
     if market not in {"stocks", "crypto"}:
         raise ValueError("SMA_OUTFITS_LIVE_MARKET must be one of: stocks, crypto")
     config_path = Path(
-        os.getenv("SMA_OUTFITS_LIVE_CONFIG", "configs/settings.example.yaml")
+        os.getenv("SMA_OUTFITS_LIVE_CONFIG", "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml")
     )
 
     settings = load_settings(config_path=config_path, env_path=Path(".env.local"))
@@ -47,3 +47,4 @@ def test_optional_alpaca_live_stream_one_hour() -> None:
     assert result.bars_received > 0
     bars = storage.read_bars(symbol, timeframe)
     assert not bars.empty
+

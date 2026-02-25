@@ -157,7 +157,7 @@ def test_verify_readiness_writes_acceptance_manifest(
 
     output_path = tmp_path / "readiness_acceptance.json"
     cli.verify_readiness(
-        config=Path("configs/settings.example.yaml"),
+        config=Path("configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"),
         start="2025-01-02T14:30:00Z",
         end="2025-01-02T21:00:00Z",
         symbols="",
@@ -211,7 +211,7 @@ def test_verify_readiness_fails_when_backfill_coverage_missing(
 
     with pytest.raises(RuntimeError, match="missing backfill coverage"):
         cli.verify_readiness(
-            config=Path("configs/settings.example.yaml"),
+            config=Path("configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"),
             start="2025-01-02T14:30:00Z",
             end="2025-01-02T21:00:00Z",
             symbols="",
@@ -249,7 +249,7 @@ def test_verify_readiness_fails_when_boundary_coverage_violation_detected(
 
     with pytest.raises(RuntimeError, match="boundary coverage violations"):
         cli.verify_readiness(
-            config=Path("configs/settings.example.yaml"),
+            config=Path("configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"),
             start="2025-01-02T14:30:00Z",
             end="2025-02-10T21:00:00Z",
             symbols="",
@@ -287,7 +287,7 @@ def test_verify_readiness_fails_when_gap_quality_violation_detected(
 
     with pytest.raises(RuntimeError, match="unexpected gap quality violations"):
         cli.verify_readiness(
-            config=Path("configs/settings.example.yaml"),
+            config=Path("configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"),
             start="2025-01-02T14:30:00Z",
             end="2025-01-08T21:00:00Z",
             symbols="",
@@ -325,7 +325,7 @@ def test_verify_readiness_fails_when_run_manifest_required_and_missing(
 
     with pytest.raises(RuntimeError, match="no run manifest found"):
         cli.verify_readiness(
-            config=Path("configs/settings.example.yaml"),
+            config=Path("configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"),
             start="2025-01-02T14:30:00Z",
             end="2025-01-02T21:00:00Z",
             symbols="",
@@ -348,7 +348,7 @@ def test_write_run_manifest_writes_expected_payload(
 
     output_path = tmp_path / "run_manifest.json"
     cli.write_run_manifest(
-        config=Path("configs/settings.example.yaml"),
+        config=Path("configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"),
         profile="custom",
         stages="validate-config,backfill,replay,report",
         analysis_start="2025-01-01T00:00:00Z",
@@ -381,3 +381,4 @@ def test_write_run_manifest_writes_expected_payload(
         "report",
     ]
     assert payload["resolved_windows"]["warmup_days"] == 120
+

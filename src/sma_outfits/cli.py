@@ -41,6 +41,13 @@ from sma_outfits.utils import dedupe_keep_order, ensure_utc_timestamp, market_fo
 app = typer.Typer(add_completion=False, help="SMA outfits Alpaca-only recreation CLI")
 _ALPACA_BASIC_HISTORICAL_START_UTC = "2016-01-01T00:00:00Z"
 _ALPACA_BASIC_HISTORICAL_DELAY_MINUTES = 15
+_STRICT_CONFIG_PATH = Path(
+    "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"
+)
+_REPLICATION_CONFIG_PATH = Path(
+    "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml"
+)
+_DEFAULT_CONFIG_PATH = _STRICT_CONFIG_PATH
 
 
 def _load_runtime_settings(config: Path) -> Settings:
@@ -528,7 +535,7 @@ def _build_regime_proxy_monthly_vol(
 @app.command("validate-config")
 def validate_config(
     config: Path = typer.Option(
-        Path("configs/settings.example.yaml"),
+        _DEFAULT_CONFIG_PATH,
         "--config",
         help="Path to settings YAML file",
     ),
@@ -547,7 +554,7 @@ def validate_config(
 @app.command("discover-range")
 def discover_range(
     config: Path | None = typer.Option(
-        Path("configs/settings.example.yaml"),
+        _DEFAULT_CONFIG_PATH,
         "--config",
         help="Optional config for universe/timeframes/session defaults",
     ),
@@ -667,7 +674,7 @@ def discover_range(
 
 @app.command("backfill")
 def backfill(
-    config: Path = typer.Option(Path("configs/settings.example.yaml"), "--config"),
+    config: Path = typer.Option(_DEFAULT_CONFIG_PATH, "--config"),
     symbols: str = typer.Option("", "--symbols", help="CSV symbols override"),
     start: str = typer.Option(..., "--start", help="UTC start timestamp"),
     end: str = typer.Option(..., "--end", help="UTC end timestamp"),
@@ -717,7 +724,7 @@ def backfill(
 
 @app.command("run-live")
 def run_live(
-    config: Path = typer.Option(Path("configs/settings.example.yaml"), "--config"),
+    config: Path = typer.Option(_DEFAULT_CONFIG_PATH, "--config"),
     symbols: str = typer.Option("", "--symbols", help="CSV symbols override"),
     timeframes: str = typer.Option("", "--timeframes", help="CSV timeframes override"),
     lookback_hours: int | None = typer.Option(
@@ -826,7 +833,7 @@ def run_live(
 
 @app.command("replay")
 def replay(
-    config: Path = typer.Option(Path("configs/settings.example.yaml"), "--config"),
+    config: Path = typer.Option(_DEFAULT_CONFIG_PATH, "--config"),
     start: str = typer.Option(..., "--start"),
     end: str = typer.Option(..., "--end"),
     symbols: str = typer.Option("", "--symbols"),
@@ -914,7 +921,7 @@ def replay(
 
 @app.command("verify-readiness")
 def verify_readiness(
-    config: Path = typer.Option(Path("configs/settings.example.yaml"), "--config"),
+    config: Path = typer.Option(_DEFAULT_CONFIG_PATH, "--config"),
     start: str = typer.Option(..., "--start", help="UTC start timestamp"),
     end: str = typer.Option(..., "--end", help="UTC end timestamp"),
     symbols: str = typer.Option("", "--symbols", help="CSV symbols override"),
@@ -1230,7 +1237,7 @@ def verify_readiness(
 
 @app.command("report")
 def report(
-    config: Path = typer.Option(Path("configs/settings.example.yaml"), "--config"),
+    config: Path = typer.Option(_DEFAULT_CONFIG_PATH, "--config"),
     date: str | None = typer.Option(None, "--date", help="YYYY-MM-DD"),
     range_: str | None = typer.Option(
         None,
@@ -1278,7 +1285,7 @@ def report(
 
 @app.command("write-run-manifest")
 def write_run_manifest(
-    config: Path = typer.Option(Path("configs/settings.example.yaml"), "--config"),
+    config: Path = typer.Option(_DEFAULT_CONFIG_PATH, "--config"),
     profile: str = typer.Option("custom", "--profile"),
     stages: str = typer.Option(
         "validate-config,backfill,replay,report",
@@ -1400,7 +1407,7 @@ def write_run_manifest(
 
 @app.command("migrate-storage-layout")
 def migrate_storage_layout(
-    config: Path = typer.Option(Path("configs/settings.example.yaml"), "--config"),
+    config: Path = typer.Option(_DEFAULT_CONFIG_PATH, "--config"),
     dry_run: bool = typer.Option(
         True,
         "--dry-run/--no-dry-run",

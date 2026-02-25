@@ -15,7 +15,7 @@ def test_report_writes_zero_summary_when_no_stored_events(settings, monkeypatch,
     monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: settings)
 
     cli.report(
-        config=Path("configs/settings.example.yaml"),
+        config=Path("configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"),
         date=None,
         range_=None,
     )
@@ -146,7 +146,7 @@ def test_report_range_preserves_close_attribution_for_signals_closed_in_window(
     )
 
     cli.report(
-        config=Path("configs/settings.example.yaml"),
+        config=Path("configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"),
         date=None,
         range_="2025-01-03T00:00:00Z,2025-01-03T23:59:59Z",
     )
@@ -155,3 +155,4 @@ def test_report_range_preserves_close_attribution_for_signals_closed_in_window(
     summary = json.loads(output.split("report_markdown=", 1)[0].strip())
     assert summary["strike_attribution"]["total_signals"] == 1
     assert summary["close_attribution"]["total_signals"] == 1
+
