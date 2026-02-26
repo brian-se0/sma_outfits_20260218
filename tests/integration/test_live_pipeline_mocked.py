@@ -428,7 +428,11 @@ def test_live_pipeline_persists_state_and_prevents_duplicate_signals_on_restart(
         )
     )
     first_signal_rows = storage.load_events("signals")
+    first_position_rows = storage.load_events("positions")
     assert first_signal_rows
+    assert first_position_rows
+    first_open_rows = [row for row in first_position_rows if row["action"] == "open"]
+    assert len(first_open_rows) == len(first_signal_rows)
 
     runner_two = LiveRunner(
         settings=live_settings,
@@ -444,7 +448,11 @@ def test_live_pipeline_persists_state_and_prevents_duplicate_signals_on_restart(
         )
     )
     second_signal_rows = storage.load_events("signals")
+    second_position_rows = storage.load_events("positions")
     assert len(second_signal_rows) == len(first_signal_rows)
+    second_open_rows = [row for row in second_position_rows if row["action"] == "open"]
+    assert len(second_open_rows) == len(first_open_rows)
+    assert {row["id"] for row in second_open_rows} == {row["id"] for row in first_open_rows}
     assert Path(live_settings.live.state_file).exists()
 
 

@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 Side = Literal["LONG", "SHORT"]
+PositionAction = Literal["open", "partial_take", "close"]
 SignalType = Literal[
     "precision_buy",
     "optimized_buy",
@@ -67,7 +68,7 @@ class SignalEvent:
 class PositionEvent:
     id: str
     signal_id: str
-    action: str
+    action: PositionAction
     qty: float
     price: float
     reason: str

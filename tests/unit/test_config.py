@@ -987,6 +987,74 @@ def test_risk_dollar_per_trade_must_be_positive(tmp_path: Path) -> None:
         load_settings(config_path=config_path, env_path=env_path)
 
 
+def test_close_only_routes_reject_non_default_inactive_risk_knobs(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    outfits_path = tmp_path / "outfits.yaml"
+    outfits_path.write_text(
+        "\n".join(
+            [
+                "outfits:",
+                "  - id: test_outfit",
+                "    periods: [10]",
+                "    description: test",
+                "    source_configuration: test",
+                "    source_ambiguous: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "outfits_path": str(outfits_path),
+                "risk": {
+                    "partial_take_r": 2.0,
+                    "final_take_r": 4.0,
+                    "timeout_bars": 240,
+                },
+                "strategy": {
+                    "strict_routing": True,
+                    "routes": [
+                        {
+                            "id": "route-1",
+                            "symbol": "SPY",
+                            "timeframe": "1m",
+                            "outfit_id": "test_outfit",
+                            "key_period": 10,
+                            "side": "LONG",
+                            "signal_type": "precision_buy",
+                            "micro_periods": [10],
+                            "ignore_close_below_key_when_micro_positive": False,
+                            "macro_gate": "none",
+                            "risk_mode": "singular_penny_only",
+                            "stop_offset": 0.01,
+                        }
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="inactive for close-only routes"):
+        load_settings(config_path=config_path, env_path=env_path)
+
+
 def test_execution_cost_scenario_lengths_must_match(tmp_path: Path) -> None:
     env_path = tmp_path / ".env.local"
     env_path.write_text(

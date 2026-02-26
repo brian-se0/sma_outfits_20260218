@@ -9,6 +9,7 @@ from sma_outfits.config.models import RouteRule
 from sma_outfits.events import BarEvent, SignalEvent
 from sma_outfits.risk.manager import RiskManager
 from sma_outfits.signals.detector import RouteBarContext
+from sma_outfits.utils import stable_id
 
 
 def _route(
@@ -199,6 +200,36 @@ def test_no_same_bar_exit_when_disabled() -> None:
     )
     assert len(next_bar_events) == 1
     assert next_bar_events[0].reason == "singular_point_hard_stop"
+
+
+def test_open_event_emits_position_lifecycle_audit_row() -> None:
+    route = _route()
+    manager = RiskManager(
+        migrations={},
+        routes={route.id: route},
+        allow_same_bar_exit=False,
+    )
+    opened_ts = datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc)
+    position = manager.open_position(
+        signal=_signal("open-audit", route.id, 100.0),
+        symbol="SPY",
+        ts=opened_ts,
+    )
+    open_event = manager.open_event(position, ts=opened_ts)
+
+    assert open_event.signal_id == position.signal_id
+    assert open_event.action == "open"
+    assert open_event.qty == position.remaining_qty
+    assert open_event.price == position.entry
+    assert open_event.reason == "position_opened"
+    assert open_event.ts == opened_ts
+    assert open_event.id == stable_id(
+        position.signal_id,
+        "open",
+        str(opened_ts),
+        "position_opened",
+        str(position.entry),
+    )
 
 
 def test_risk_migration_rule_remains_supported() -> None:

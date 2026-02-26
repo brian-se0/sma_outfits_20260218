@@ -261,6 +261,10 @@ def test_replay_qqq_micro_positive_override_and_rwm_singular_close(
     assert any(event.reason == "singular_point_hard_stop" for event in qqq_events)
     assert any(event.ts == rwm_close_bar_ts for event in rwm_events)
     assert any(event.reason == "singular_point_hard_stop" for event in rwm_events)
+    open_events = [event for event in result.position_events if event.action == "open"]
+    close_events = [event for event in result.position_events if event.action == "close"]
+    assert len(open_events) == len(result.signals)
+    assert len(close_events) == len(result.signals)
 
 
 def test_replay_fails_when_outfits_path_missing(settings) -> None:
@@ -479,8 +483,9 @@ def test_replay_regression_rwm_jan31_event_path_is_profitable(
     assert signal.entry == 18.0
     assert signal.stop < (signal.entry - 0.01)
 
-    assert len(result.position_events) == 1
-    close_event = result.position_events[0]
+    close_events = [event for event in result.position_events if event.action == "close"]
+    assert len(close_events) == 1
+    close_event = close_events[0]
     assert close_event.reason == "atr_dynamic_stop"
     assert close_event.ts == pd.Timestamp("2025-01-31T21:00:00Z").to_pydatetime()
     assert close_event.price > signal.entry

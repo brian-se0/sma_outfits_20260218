@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from sma_outfits.config.models import CitationsConfig, ExecutionCostsConfig, ValidationConfig
-from sma_outfits.events import PositionEvent, SignalEvent, StrikeEvent
+from sma_outfits.events import PositionAction, PositionEvent, SignalEvent, StrikeEvent
 from sma_outfits.reporting.academic_validation import (
     build_academic_validation_payload,
     write_bootstrap_histogram_png,
@@ -46,6 +46,7 @@ def build_summary(
         "total_strikes": len(strikes),
         "total_signals": len(signals),
         "total_position_events": len(position_events),
+        "position_action_breakdown": _position_action_breakdown(position_events),
         "closed_positions": len(closed_outcomes),
         "win_rate": (len(hits) / len(closed_outcomes)) if closed_outcomes else 0.0,
         "hit_rate": (len(hits) / len(closed_outcomes)) if closed_outcomes else 0.0,
@@ -283,6 +284,7 @@ def _compute_signal_outcomes(
         closed = False
 
         events = sorted(grouped_positions.get(signal.id, []), key=lambda row: row.ts)
+        # Only liquidation events are allowed to affect realized PnL outcomes.
         fill_events = [event for event in events if event.action in {"partial_take", "close"}]
         realized_qty = sum(float(event.qty) for event in fill_events)
         if fill_events and realized_qty <= 0:
@@ -454,6 +456,11 @@ def _render_markdown_section(
         f"- total_strikes: `{summary['total_strikes']}`",
         f"- total_signals: `{summary['total_signals']}`",
         f"- total_position_events: `{summary['total_position_events']}`",
+        "- position_action_breakdown: `{}`".format(
+            _format_position_action_breakdown(
+                summary.get("position_action_breakdown", {})
+            )
+        ),
         f"- closed_positions: `{summary['closed_positions']}`",
         f"- hit_rate: `{summary['hit_rate']:.4f}`",
         f"- statistical_ready_for_production: `{str(ready_for_production).lower()}`",
@@ -1252,10 +1259,15 @@ def _record_to_signal(row: dict[str, Any]) -> SignalEvent:
 
 
 def _record_to_position(row: dict[str, Any]) -> PositionEvent:
+    action = str(row["action"])
+    if action not in {"open", "partial_take", "close"}:
+        raise RuntimeError(
+            "Position event contract violation: unsupported action '{}'".format(action)
+        )
     return PositionEvent(
         id=str(row["id"]),
         signal_id=str(row["signal_id"]),
-        action=str(row["action"]),
+        action=action,  # type: ignore[arg-type]
         qty=float(row["qty"]),
         price=float(row["price"]),
         reason=str(row["reason"]),
@@ -1298,3 +1310,24 @@ def _require_breakdown_label(
             f"row[{index}] key '{key}' must be non-empty string, got {value!r}"
         )
     return value
+
+
+def _position_action_breakdown(
+    position_events: list[PositionEvent],
+) -> dict[str, int]:
+    counts = Counter(str(event.action) for event in position_events)
+    return {
+        "open": int(counts.get("open", 0)),
+        "partial_take": int(counts.get("partial_take", 0)),
+        "close": int(counts.get("close", 0)),
+    }
+
+
+def _format_position_action_breakdown(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return "open=0, partial_take=0, close=0"
+    action_order: tuple[PositionAction, ...] = ("open", "partial_take", "close")
+    return ", ".join(
+        f"{action}={int(payload.get(action, 0))}"
+        for action in action_order
+    )

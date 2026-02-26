@@ -1029,6 +1029,29 @@ class Settings(BaseModel):
                     "strategy.ambiguity_policy=fail".format(index, route.outfit_id)
                 )
 
+        close_only_modes = {"singular_penny_only", "penny_reference_break"}
+        if routes and all(route.risk_mode in close_only_modes for route in routes):
+            non_default_knobs: list[str] = []
+            if self.risk.partial_take_r != 1.0:
+                non_default_knobs.append(
+                    f"risk.partial_take_r={self.risk.partial_take_r}"
+                )
+            if self.risk.final_take_r != 3.0:
+                non_default_knobs.append(
+                    f"risk.final_take_r={self.risk.final_take_r}"
+                )
+            if self.risk.timeout_bars != 120:
+                non_default_knobs.append(
+                    f"risk.timeout_bars={self.risk.timeout_bars}"
+                )
+            if non_default_knobs:
+                raise ValueError(
+                    "risk partial/final/timeout knobs are inactive for close-only routes "
+                    "(singular_penny_only, penny_reference_break); reset to defaults. "
+                    "Configured non-default values: "
+                    + ", ".join(non_default_knobs)
+                )
+
         unknown_scope = [
             symbol for symbol in self.validation.scope_symbols if symbol not in self.universe.symbol_markets
         ]

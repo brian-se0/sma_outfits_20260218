@@ -9,6 +9,9 @@ Explicit analysis of SMA outfit (blackbox) use in public equity markets for real
 - Config contract: no legacy `strategy.mode`; behavior is route/config driven.
 - Reporting contract: canonical `both` attribution only (`strike_attribution` + `close_attribution`).
 - Live/replay parity: `atr_dynamic_stop` and `cross_symbol_context` are supported in both modes.
+- Position lifecycle contract: `positions` event stream emits lifecycle actions (`open`, `partial_take`, `close`); closed-trade analytics must filter on `action == "close"` (not `total_position_events`).
+- Live runtime contract: signal generation, state persistence, duplicate/late-bar protection, stale-feed recovery, and optional reconciliation are supported.
+- Live execution non-goal (current): no broker order submission or fill-callback handling is implemented.
 - Fallback code paths (stream reconnect/stale-feed recovery/idempotent duplicate handling) are intentionally preserved.
 
 ## Validation Workflows

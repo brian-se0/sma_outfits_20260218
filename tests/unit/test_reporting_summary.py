@@ -66,6 +66,15 @@ def test_build_summary_includes_r_outcomes_and_breakdowns() -> None:
     ]
     positions = [
         PositionEvent(
+            id="p0",
+            signal_id="signal-1",
+            action="open",
+            qty=1.0,
+            price=100.0,
+            reason="position_opened",
+            ts=datetime(2025, 1, 2, 14, 30, tzinfo=timezone.utc),
+        ),
+        PositionEvent(
             id="p1",
             signal_id="signal-1",
             action="partial_take",
@@ -84,6 +93,15 @@ def test_build_summary_includes_r_outcomes_and_breakdowns() -> None:
             ts=datetime(2025, 1, 2, 14, 32, tzinfo=timezone.utc),
         ),
         PositionEvent(
+            id="p2-open",
+            signal_id="signal-2",
+            action="open",
+            qty=1.0,
+            price=200.0,
+            reason="position_opened",
+            ts=datetime(2025, 1, 2, 15, 30, tzinfo=timezone.utc),
+        ),
+        PositionEvent(
             id="p3",
             signal_id="signal-2",
             action="close",
@@ -98,6 +116,11 @@ def test_build_summary_includes_r_outcomes_and_breakdowns() -> None:
 
     assert summary["closed_positions"] == 2
     assert summary["hit_rate"] == 0.5
+    assert summary["position_action_breakdown"] == {
+        "open": 2,
+        "partial_take": 1,
+        "close": 2,
+    }
     assert summary["r_outcome"]["total_realized_r"] == 1.5
     assert summary["r_outcome"]["bucket_counts"]["1R_to_3R"] == 1
     assert summary["r_outcome"]["bucket_counts"]["<=-1R"] == 1
@@ -141,16 +164,30 @@ def test_build_summary_normalizes_r_by_total_realized_qty() -> None:
         reason="+1R_final_take",
         ts=datetime(2025, 1, 2, 14, 31, tzinfo=timezone.utc),
     )
+    open_event = PositionEvent(
+        id="p-qty-open",
+        signal_id="signal-qty",
+        action="open",
+        qty=100.0,
+        price=100.0,
+        reason="position_opened",
+        ts=datetime(2025, 1, 2, 14, 30, tzinfo=timezone.utc),
+    )
 
     summary = build_summary(
         strikes=[strike],
         signals=[signal],
-        position_events=[close_event],
+        position_events=[open_event, close_event],
     )
 
     assert summary["r_outcome"]["total_realized_r"] == 1.0
     assert summary["r_outcome"]["avg_realized_r"] == 1.0
     assert summary["hit_rate"] == 1.0
+    assert summary["position_action_breakdown"] == {
+        "open": 1,
+        "partial_take": 0,
+        "close": 1,
+    }
 
 
 def test_build_summary_from_records_applies_time_range() -> None:
@@ -335,6 +372,7 @@ def test_write_summary_report_both_mode_adds_close_columns_and_sections(tmp_path
     markdown = markdown_path.read_text(encoding="utf-8")
     assert "Strike-Time Attribution" in markdown
     assert "Close-Time Attribution" in markdown
+    assert "position_action_breakdown" in markdown
     assert "Academic Validation Appendix" in markdown
     assert "Claim Scope (Statistical)" in markdown
     assert "null_hypothesis: `mean(net_realized_r) <= 0`" in markdown

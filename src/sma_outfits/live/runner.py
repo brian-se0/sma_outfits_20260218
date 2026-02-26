@@ -485,23 +485,23 @@ class LiveRunner:
         new_signals = [pair[1] for pair in prepared_pairs]
 
         active_positions = self._active_positions_by_key.get(key, [])
+        position_events: list[PositionEvent] = []
         for signal in new_signals:
-            active_positions.append(
-                self._risk_manager.open_position(
-                    signal,
-                    symbol=symbol,
-                    ts=bar.ts,
-                    route_context=route_contexts_by_route_id.get(signal.route_id),
-                    cross_context_lookup=self._cross_context_lookup,
-                )
+            opened_position = self._risk_manager.open_position(
+                signal,
+                symbol=symbol,
+                ts=bar.ts,
+                route_context=route_contexts_by_route_id.get(signal.route_id),
+                cross_context_lookup=self._cross_context_lookup,
             )
+            active_positions.append(opened_position)
+            position_events.append(self._risk_manager.open_event(opened_position, ts=bar.ts))
 
         archive_records: list[ArchiveRecord] = []
         for strike, signal in zip(new_strikes, new_signals, strict=True):
             if self.settings.archive.enabled:
                 archive_records.append(self._archive_signal(strike=strike, signal=signal))
 
-        position_events: list[PositionEvent] = []
         next_positions: list[ManagedPosition] = []
         for position in active_positions:
             events = self._risk_manager.evaluate_bar(

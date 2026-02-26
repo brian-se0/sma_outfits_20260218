@@ -7,7 +7,12 @@ from typing import Any, Callable, Literal
 import pandas as pd
 
 from sma_outfits.config.models import RouteRule
-from sma_outfits.events import BarEvent, PositionEvent, SignalEvent
+from sma_outfits.events import (
+    BarEvent,
+    PositionAction,
+    PositionEvent,
+    SignalEvent,
+)
 from sma_outfits.signals.detector import RouteBarContext
 from sma_outfits.utils import stable_id
 
@@ -782,11 +787,25 @@ class RiskManager:
             reason=reason,
         )
 
+    def open_event(
+        self,
+        position: ManagedPosition,
+        ts: datetime,
+    ) -> PositionEvent:
+        return self._event(
+            position,
+            ts=ts,
+            action="open",
+            qty=position.remaining_qty,
+            price=position.entry,
+            reason="position_opened",
+        )
+
     @staticmethod
     def _event(
         position: ManagedPosition,
         ts: datetime,
-        action: str,
+        action: PositionAction,
         qty: float,
         price: float,
         reason: str,

@@ -247,14 +247,16 @@ class ReplayEngine:
 
                 active_positions = active_positions_by_key.get(work.key, [])
                 for signal in new_signals:
-                    active_positions.append(
-                        self.risk_manager.open_position(
-                            signal=signal,
-                            symbol=work.bar.symbol,
-                            ts=work.bar.ts,
-                            route_context=work.route_contexts_by_route_id.get(signal.route_id),
-                            cross_context_lookup=_cross_context_lookup,
-                        )
+                    opened_position = self.risk_manager.open_position(
+                        signal=signal,
+                        symbol=work.bar.symbol,
+                        ts=work.bar.ts,
+                        route_context=work.route_contexts_by_route_id.get(signal.route_id),
+                        cross_context_lookup=_cross_context_lookup,
+                    )
+                    active_positions.append(opened_position)
+                    position_events.append(
+                        self.risk_manager.open_event(opened_position, ts=work.bar.ts)
                     )
 
                 for strike, signal in zip(new_strikes, new_signals, strict=True):
