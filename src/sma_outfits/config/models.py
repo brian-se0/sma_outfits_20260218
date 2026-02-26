@@ -119,6 +119,20 @@ DEFAULT_STRATEGY_ROUTES = [
         "stop_offset": 0.01,
     },
     {
+        "id": "qqq_1h_author_short",
+        "symbol": "QQQ",
+        "timeframe": "1h",
+        "outfit_id": "base2_nvda",
+        "key_period": 512,
+        "side": "SHORT",
+        "signal_type": "automated_short",
+        "micro_periods": [16, 32, 64, 128, 256],
+        "ignore_close_below_key_when_micro_positive": True,
+        "macro_gate": "nas",
+        "risk_mode": "singular_penny_only",
+        "stop_offset": 0.01,
+    },
+    {
         "id": "rwm_30m_author",
         "symbol": "RWM",
         "timeframe": "30m",
@@ -126,6 +140,20 @@ DEFAULT_STRATEGY_ROUTES = [
         "key_period": 844,
         "side": "LONG",
         "signal_type": "magnetized_buy",
+        "micro_periods": [26, 52, 116, 211, 422],
+        "ignore_close_below_key_when_micro_positive": False,
+        "macro_gate": "none",
+        "risk_mode": "singular_penny_only",
+        "stop_offset": 0.01,
+    },
+    {
+        "id": "rwm_30m_author_short",
+        "symbol": "RWM",
+        "timeframe": "30m",
+        "outfit_id": "svix_211",
+        "key_period": 844,
+        "side": "SHORT",
+        "signal_type": "automated_short",
         "micro_periods": [26, 52, 116, 211, 422],
         "ignore_close_below_key_when_micro_positive": False,
         "macro_gate": "none",
@@ -917,17 +945,17 @@ class Settings(BaseModel):
             )
 
         seen_route_ids: set[str] = set()
-        seen_route_keys: set[tuple[str, str]] = set()
+        seen_route_keys: set[tuple[str, str, str]] = set()
         for route in routes:
             if route.id in seen_route_ids:
                 raise ValueError(f"Duplicate strategy route id '{route.id}'")
             seen_route_ids.add(route.id)
             if self.strategy.strict_routing:
-                route_key = (route.symbol, route.timeframe)
+                route_key = (route.symbol, route.timeframe, route.side)
                 if route_key in seen_route_keys:
                     raise ValueError(
                         "Duplicate strategy route key for strict routing: "
-                        f"{route.symbol}/{route.timeframe}"
+                        f"{route.symbol}/{route.timeframe}/{route.side}"
                     )
                 seen_route_keys.add(route_key)
 

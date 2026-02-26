@@ -453,11 +453,14 @@ class LiveRunner:
                 price_basis=self.settings.strategy.price_basis,
             ),
         )
-        route_context = self._detector.build_route_context(
+        route_contexts = self._detector.build_route_contexts(
             bar=bar,
             sma_states=sma_states,
         )
-        if route_context is not None:
+        route_contexts_by_route_id = {
+            context.route.id: context for context in route_contexts
+        }
+        for route_context in route_contexts:
             self._latest_context_by_route_id[route_context.route.id] = (
                 to_utc_timestamp(bar.ts),
                 route_context,
@@ -488,7 +491,7 @@ class LiveRunner:
                     signal,
                     symbol=symbol,
                     ts=bar.ts,
-                    route_context=route_context,
+                    route_context=route_contexts_by_route_id.get(signal.route_id),
                     cross_context_lookup=self._cross_context_lookup,
                 )
             )
@@ -505,7 +508,7 @@ class LiveRunner:
                 position,
                 bar=bar,
                 proxy_prices=self._proxy_prices,
-                route_context=route_context,
+                route_context=route_contexts_by_route_id.get(position.route_id),
                 route_history=history,
                 cross_context_lookup=self._cross_context_lookup,
             )

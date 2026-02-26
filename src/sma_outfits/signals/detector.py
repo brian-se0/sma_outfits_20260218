@@ -127,15 +127,18 @@ class StrikeDetector:
         self._outfits_by_id: dict[str, OutfitDefinition] = {
             outfit.outfit_id: outfit for outfit in outfits
         }
-        self._routes_by_key: dict[tuple[str, str], RouteRule] = {}
+        self._routes_by_key: dict[tuple[str, str], list[RouteRule]] = {}
+        seen_direction_keys: set[tuple[str, str, str]] = set()
         for route in routes:
             route_key = (route.symbol, route.timeframe)
-            if self.strict_routing and route_key in self._routes_by_key:
+            direction_key = (route.symbol, route.timeframe, route.side)
+            if self.strict_routing and direction_key in seen_direction_keys:
                 raise RuntimeError(
                     "Duplicate route for strict routing key "
-                    f"{route.symbol}/{route.timeframe}"
+                    f"{route.symbol}/{route.timeframe}/{route.side}"
                 )
-            self._routes_by_key[route_key] = route
+            seen_direction_keys.add(direction_key)
+            self._routes_by_key.setdefault(route_key, []).append(route)
             if route.outfit_id not in self._outfits_by_id:
                 raise RuntimeError(
                     f"Route '{route.id}' references unknown outfit '{route.outfit_id}'"
@@ -144,75 +147,94 @@ class StrikeDetector:
 
     def required_periods(self) -> set[int]:
         periods: set[int] = set()
-        for route in self._routes_by_key.values():
-            periods.add(route.key_period)
-            periods.update(route.micro_periods)
-            if route.confluence.enabled:
-                outfit = self._outfits_by_id.get(route.outfit_id)
-                if outfit is None:
-                    raise RuntimeError(
-                        f"Route '{route.id}' references unknown outfit '{route.outfit_id}'"
-                    )
-                periods.update(outfit.periods)
-            if route.macro_gate != "none":
-                macro_periods = MACRO_PERIODS.get(route.macro_gate)
-                if macro_periods is None:
-                    raise RuntimeError(
-                        f"Unsupported macro gate '{route.macro_gate}' for route '{route.id}'"
-                    )
-                periods.update(macro_periods)
+        for routes in self._routes_by_key.values():
+            for route in routes:
+                periods.add(route.key_period)
+                periods.update(route.micro_periods)
+                if route.confluence.enabled:
+                    outfit = self._outfits_by_id.get(route.outfit_id)
+                    if outfit is None:
+                        raise RuntimeError(
+                            f"Route '{route.id}' references unknown outfit '{route.outfit_id}'"
+                        )
+                    periods.update(outfit.periods)
+                if route.macro_gate != "none":
+                    macro_periods = MACRO_PERIODS.get(route.macro_gate)
+                    if macro_periods is None:
+                        raise RuntimeError(
+                            f"Unsupported macro gate '{route.macro_gate}' for route '{route.id}'"
+                        )
+                    periods.update(macro_periods)
         return periods
 
-    def resolve_route(self, symbol: str, timeframe: str) -> RouteRule | None:
-        route = self._routes_by_key.get((symbol.upper(), timeframe))
-        if route is not None:
-            return route
+    def resolve_routes(self, symbol: str, timeframe: str) -> list[RouteRule]:
+        routes = self._routes_by_key.get((symbol.upper(), timeframe))
+        if routes is not None:
+            return routes
         if self.strict_routing:
             raise RuntimeError(
                 "Strict routing violation: no route configured for "
                 f"{symbol.upper()}/{timeframe}"
             )
-        return None
+        return []
 
     def build_route_context(
         self,
         bar: BarEvent,
         sma_states: dict[int, SMAState],
     ) -> RouteBarContext | None:
-        route = self.resolve_route(bar.symbol, bar.timeframe)
-        if route is None:
+        contexts = self.build_route_contexts(bar=bar, sma_states=sma_states)
+        if not contexts:
             return None
+        return contexts[0]
 
-        key_state = sma_states.get(route.key_period)
-        if key_state is None:
-            return None
+    def build_route_contexts(
+        self,
+        bar: BarEvent,
+        sma_states: dict[int, SMAState],
+    ) -> list[RouteBarContext]:
+        routes = self.resolve_routes(bar.symbol, bar.timeframe)
+        if not routes:
+            return []
 
-        micro_values: list[float] = []
-        for period in route.micro_periods:
-            state = sma_states.get(period)
-            if state is None:
-                return None
-            micro_values.append(state.value)
+        contexts: list[RouteBarContext] = []
+        for route in routes:
+            key_state = sma_states.get(route.key_period)
+            if key_state is None:
+                continue
 
-        if route.side == "LONG":
-            micro_positive = all(
-                bar.close >= (value - self.tolerance) for value in micro_values
+            micro_values: list[float] = []
+            for period in route.micro_periods:
+                state = sma_states.get(period)
+                if state is None:
+                    micro_values = []
+                    break
+                micro_values.append(state.value)
+            if not micro_values:
+                continue
+
+            if route.side == "LONG":
+                micro_positive = all(
+                    bar.close >= (value - self.tolerance) for value in micro_values
+                )
+            else:
+                micro_positive = all(
+                    bar.close <= (value + self.tolerance) for value in micro_values
+                )
+
+            macro_positive = self._macro_positive(route, sma_states)
+            if macro_positive is None:
+                continue
+
+            contexts.append(
+                RouteBarContext(
+                    route=route,
+                    key_sma=key_state.value,
+                    micro_positive=micro_positive,
+                    macro_positive=macro_positive,
+                )
             )
-        else:
-            micro_positive = all(
-                bar.close <= (value + self.tolerance) for value in micro_values
-            )
-
-        macro_positive = self._macro_positive(route, sma_states)
-        if macro_positive is None:
-            return None
-
-        return RouteBarContext(
-            route=route,
-            key_sma=key_state.value,
-            micro_positive=micro_positive,
-            macro_positive=macro_positive,
-        )
+        return contexts
 
     def detect(
         self,
@@ -222,76 +244,81 @@ class StrikeDetector:
         session_type: str = "regular",
         cross_context_lookup: Callable[[str, datetime], RouteBarContext | None] | None = None,
     ) -> tuple[list[StrikeEvent], list[SignalEvent]]:
-        context = self.build_route_context(bar=bar, sma_states=sma_states)
-        if context is None:
+        contexts = self.build_route_contexts(bar=bar, sma_states=sma_states)
+        if not contexts:
             return [], []
 
-        if not context.micro_positive or not context.macro_positive:
-            return [], []
-        if not self._triggered(bar=bar, context=context, history=history):
-            return [], []
-        if not self._passes_confluence(
-            bar=bar,
-            route=context.route,
-            sma_states=sma_states,
-            history=history,
-        ):
-            return [], []
-        if not self._passes_cross_symbol_context(
-            bar=bar,
-            context=context,
-            cross_context_lookup=cross_context_lookup,
-        ):
-            return [], []
+        strikes: list[StrikeEvent] = []
+        signals: list[SignalEvent] = []
+        for context in contexts:
+            if not context.micro_positive or not context.macro_positive:
+                continue
+            if not self._triggered(bar=bar, context=context, history=history):
+                continue
+            if not self._passes_confluence(
+                bar=bar,
+                route=context.route,
+                sma_states=sma_states,
+                history=history,
+            ):
+                continue
+            if not self._passes_cross_symbol_context(
+                bar=bar,
+                context=context,
+                cross_context_lookup=cross_context_lookup,
+            ):
+                continue
 
-        route = context.route
-        strike_id = stable_id(
-            "strike",
-            bar.symbol,
-            bar.timeframe,
-            _ts_iso(bar.ts),
-            route.id,
-            route.outfit_id,
-            str(route.key_period),
-        )
-        if strike_id in self._seen_keys:
-            return [], []
-        self._seen_keys.add(strike_id)
+            route = context.route
+            strike_id = stable_id(
+                "strike",
+                bar.symbol,
+                bar.timeframe,
+                _ts_iso(bar.ts),
+                route.id,
+                route.outfit_id,
+                str(route.key_period),
+            )
+            if strike_id in self._seen_keys:
+                continue
+            self._seen_keys.add(strike_id)
 
-        strike = StrikeEvent(
-            id=strike_id,
-            symbol=bar.symbol,
-            timeframe=bar.timeframe,
-            outfit_id=route.outfit_id,
-            period=route.key_period,
-            sma_value=context.key_sma,
-            bar_ts=bar.ts,
-            tolerance=self.tolerance,
-            trigger_mode=self.trigger_mode,
-        )
-        entry = round(context.key_sma, 2)
-        stop = (
-            round(entry - route.stop_offset, 2)
-            if route.side == "LONG"
-            else round(entry + route.stop_offset, 2)
-        )
-        confidence = (
-            "HIGH"
-            if route.signal_type in {"precision_buy", "automated_short", "magnetized_buy"}
-            else "MEDIUM"
-        )
-        signal = SignalEvent(
-            id=stable_id("signal", strike.id, route.id, route.side),
-            strike_id=strike.id,
-            route_id=route.id,
-            side=route.side,
-            signal_type=route.signal_type,  # type: ignore[arg-type]
-            entry=entry,
-            stop=stop,
-            confidence=confidence,
-            session_type=session_type,  # type: ignore[arg-type]
-        )
-        return [strike], [signal]
+            strike = StrikeEvent(
+                id=strike_id,
+                symbol=bar.symbol,
+                timeframe=bar.timeframe,
+                outfit_id=route.outfit_id,
+                period=route.key_period,
+                sma_value=context.key_sma,
+                bar_ts=bar.ts,
+                tolerance=self.tolerance,
+                trigger_mode=self.trigger_mode,
+            )
+            entry = round(context.key_sma, 2)
+            stop = (
+                round(entry - route.stop_offset, 2)
+                if route.side == "LONG"
+                else round(entry + route.stop_offset, 2)
+            )
+            confidence = (
+                "HIGH"
+                if route.signal_type in {"precision_buy", "automated_short", "magnetized_buy"}
+                else "MEDIUM"
+            )
+            signal = SignalEvent(
+                id=stable_id("signal", strike.id, route.id, route.side),
+                strike_id=strike.id,
+                route_id=route.id,
+                side=route.side,
+                signal_type=route.signal_type,  # type: ignore[arg-type]
+                entry=entry,
+                stop=stop,
+                confidence=confidence,
+                session_type=session_type,  # type: ignore[arg-type]
+            )
+            strikes.append(strike)
+            signals.append(signal)
+        return strikes, signals
 
     def _triggered(
         self,
@@ -303,7 +330,10 @@ class StrikeDetector:
             raise RuntimeError(f"Unsupported strategy trigger_mode '{self.trigger_mode}'")
 
         key_sma = context.key_sma
-        touch = abs(bar.close - key_sma) <= self.tolerance
+        if context.route.side == "LONG":
+            touch = 0.0 <= (bar.close - key_sma) <= self.tolerance
+        else:
+            touch = 0.0 < (key_sma - bar.close) <= self.tolerance
 
         prev_close: float | None = None
         if len(history) >= 2 and "close" in history.columns:
@@ -411,7 +441,9 @@ class StrikeDetector:
         slow = sma_states.get(slow_period)
         if fast is None or slow is None:
             return None
-        return fast.value >= slow.value
+        if route.side == "LONG":
+            return fast.value >= slow.value
+        return fast.value <= slow.value
 
 
 def _ts_iso(ts: datetime) -> str:

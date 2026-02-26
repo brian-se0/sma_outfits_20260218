@@ -143,6 +143,27 @@ strategy:
       atr:
         period: 14
         multiplier: 1.5
+    - id: qqq_1h_author_short
+      symbol: QQQ
+      timeframe: 1h
+      outfit_id: base2_nvda
+      key_period: 512
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [16, 32, 64, 128, 256]
+      ignore_close_below_key_when_micro_positive: true
+      macro_gate: nas
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
     - id: rwm_30m_author
       symbol: RWM
       timeframe: 30m
@@ -170,6 +191,33 @@ strategy:
           - reference_route_id: qqq_1h_author
             require_macro_positive: false
             require_micro_positive: false
+    - id: rwm_30m_author_short
+      symbol: RWM
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: true
+            require_micro_positive: true
     - id: svix_30m_author
       symbol: SVIX
       timeframe: 30m
@@ -200,6 +248,36 @@ strategy:
           - reference_route_id: smh_2h_author
             require_macro_positive: true
             require_micro_positive: true
+    - id: svix_30m_author_short
+      symbol: SVIX
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
+          - reference_route_id: smh_2h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
     - id: sqqq_30m_author
       symbol: SQQQ
       timeframe: 30m
@@ -230,6 +308,36 @@ strategy:
           - reference_route_id: smh_2h_author
             require_macro_positive: false
             require_micro_positive: false
+    - id: sqqq_30m_author_short
+      symbol: SQQQ
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: true
+            require_micro_positive: true
+          - reference_route_id: smh_2h_author_short
+            require_macro_positive: true
+            require_micro_positive: true
     - id: tqqq_30m_author
       symbol: TQQQ
       timeframe: 30m
@@ -260,6 +368,36 @@ strategy:
           - reference_route_id: smh_2h_author
             require_macro_positive: true
             require_micro_positive: true
+    - id: tqqq_30m_author_short
+      symbol: TQQQ
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
+          - reference_route_id: smh_2h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
     - id: iwm_30m_author
       symbol: IWM
       timeframe: 30m
@@ -267,6 +405,27 @@ strategy:
       key_period: 844
       side: LONG
       signal_type: magnetized_buy
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+    - id: iwm_30m_author_short
+      symbol: IWM
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: SHORT
+      signal_type: automated_short
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
@@ -311,6 +470,36 @@ strategy:
           - reference_route_id: smh_2h_author
             require_macro_positive: true
             require_micro_positive: true
+    - id: xlf_30m_author_short
+      symbol: XLF
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
+          - reference_route_id: smh_2h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
     - id: soxl_30m_author
       symbol: SOXL
       timeframe: 30m
@@ -341,6 +530,36 @@ strategy:
           - reference_route_id: smh_2h_author
             require_macro_positive: true
             require_micro_positive: true
+    - id: soxl_30m_author_short
+      symbol: SOXL
+      timeframe: 30m
+      outfit_id: warings_problem
+      key_period: 548
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [19, 37, 73, 143, 279]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 2
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.2
+      atr:
+        period: 14
+        multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
+          - reference_route_id: smh_2h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
     - id: spy_30m_author
       symbol: SPY
       timeframe: 30m
@@ -371,6 +590,36 @@ strategy:
           - reference_route_id: smh_2h_author
             require_macro_positive: true
             require_micro_positive: true
+    - id: spy_30m_author_short
+      symbol: SPY
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
+          - reference_route_id: smh_2h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
     - id: upro_30m_author
       symbol: UPRO
       timeframe: 30m
@@ -378,6 +627,27 @@ strategy:
       key_period: 844
       side: LONG
       signal_type: magnetized_buy
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+    - id: upro_30m_author_short
+      symbol: UPRO
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: SHORT
+      signal_type: automated_short
       micro_periods: [26, 52, 106, 211, 422]
       ignore_close_below_key_when_micro_positive: false
       macro_gate: none
@@ -440,6 +710,54 @@ strategy:
           - reference_route_id: smh_2h_author
             require_macro_positive: false
             require_micro_positive: false
+    - id: vixy_30m_author_short
+      symbol: VIXY
+      timeframe: 30m
+      outfit_id: svix_211_106
+      key_period: 844
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [26, 52, 106, 211, 422]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 3
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.5
+      atr:
+        period: 14
+        multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
+          - reference_route_id: smh_2h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
+          - reference_route_id: smh_2h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: true
+            require_micro_positive: true
+          - reference_route_id: smh_2h_author_short
+            require_macro_positive: true
+            require_micro_positive: true
     - id: xlf_2h_author
       symbol: XLF
       timeframe: 2h
@@ -464,6 +782,30 @@ strategy:
           - reference_route_id: qqq_1h_author
             require_macro_positive: false
             require_micro_positive: false
+    - id: xlf_2h_author_short
+      symbol: XLF
+      timeframe: 2h
+      outfit_id: warings_problem
+      key_period: 548
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [19, 37, 73, 143, 279]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 2
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.2
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: true
+            require_micro_positive: true
     - id: smh_2h_author
       symbol: SMH
       timeframe: 2h
@@ -488,6 +830,30 @@ strategy:
           - reference_route_id: qqq_1h_author
             require_macro_positive: false
             require_micro_positive: false
+    - id: smh_2h_author_short
+      symbol: SMH
+      timeframe: 2h
+      outfit_id: warings_problem
+      key_period: 548
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [19, 37, 73, 143, 279]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 2
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.2
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: true
+            require_micro_positive: true
     - id: soxl_1h_author
       symbol: SOXL
       timeframe: 1h
@@ -518,6 +884,36 @@ strategy:
           - reference_route_id: smh_2h_author
             require_macro_positive: true
             require_micro_positive: true
+    - id: soxl_1h_author_short
+      symbol: SOXL
+      timeframe: 1h
+      outfit_id: warings_problem
+      key_period: 548
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [19, 37, 73, 143, 279]
+      ignore_close_below_key_when_micro_positive: false
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 2
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.2
+      atr:
+        period: 14
+        multiplier: 1.5
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: qqq_1h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
+          - reference_route_id: smh_2h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
     - id: soxl_2h_author
       symbol: SOXL
       timeframe: 2h
@@ -541,6 +937,30 @@ strategy:
           - reference_route_id: smh_2h_author
             require_macro_positive: true
             require_micro_positive: true
+
+    - id: soxl_2h_author_short
+      symbol: SOXL
+      timeframe: 2h
+      outfit_id: warings_problem
+      key_period: 548
+      side: SHORT
+      signal_type: automated_short
+      micro_periods: [19, 37, 73, 143, 279]
+      macro_gate: none
+      risk_mode: penny_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: true
+        min_outfit_alignment_count: 2
+        volume_lookback_bars: 20
+        volume_spike_ratio: 1.2
+      cross_symbol_context:
+        enabled: true
+        rules:
+          - reference_route_id: smh_2h_author_short
+            require_macro_positive: false
+            require_micro_positive: false
 
 risk:
   long_break: 0.01

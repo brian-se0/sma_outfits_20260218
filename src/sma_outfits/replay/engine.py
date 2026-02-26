@@ -53,7 +53,7 @@ class _ReplayBarWork:
     bar: BarEvent
     history: pd.DataFrame
     sma_states: dict[int, SMAState]
-    route_context: RouteBarContext | None
+    route_contexts_by_route_id: dict[str, RouteBarContext]
 
 
 class ReplayEngine:
@@ -210,8 +210,8 @@ class ReplayEngine:
                         price_basis=self.settings.strategy.price_basis,
                     ),
                 )
-                route_context = self.detector.build_route_context(bar=bar, sma_states=sma_states)
-                if route_context is not None:
+                route_contexts = self.detector.build_route_contexts(bar=bar, sma_states=sma_states)
+                for route_context in route_contexts:
                     latest_context_by_route_id[route_context.route.id] = (bar_ts, route_context)
 
                 pass_work.append(
@@ -220,7 +220,9 @@ class ReplayEngine:
                         bar=bar,
                         history=history,
                         sma_states=sma_states,
-                        route_context=route_context,
+                        route_contexts_by_route_id={
+                            context.route.id: context for context in route_contexts
+                        },
                     )
                 )
 
@@ -250,7 +252,7 @@ class ReplayEngine:
                             signal=signal,
                             symbol=work.bar.symbol,
                             ts=work.bar.ts,
-                            route_context=work.route_context,
+                            route_context=work.route_contexts_by_route_id.get(signal.route_id),
                             cross_context_lookup=_cross_context_lookup,
                         )
                     )
@@ -265,7 +267,7 @@ class ReplayEngine:
                         position=position,
                         bar=work.bar,
                         proxy_prices=proxy_prices,
-                        route_context=work.route_context,
+                        route_context=work.route_contexts_by_route_id.get(position.route_id),
                         route_history=work.history,
                         cross_context_lookup=_cross_context_lookup,
                     )

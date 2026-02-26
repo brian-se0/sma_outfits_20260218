@@ -111,7 +111,7 @@ def test_close_touch_or_cross_trigger_long_and_short() -> None:
     )
     short_route = RouteRule(
         id="short_route",
-        symbol="QQQ",
+        symbol="SPY",
         timeframe="1m",
         outfit_id="route_outfit",
         key_period=10,
@@ -146,7 +146,7 @@ def test_close_touch_or_cross_trigger_long_and_short() -> None:
     assert len(long_touch_signals) == 1
     assert long_touch_signals[0].side == "LONG"
 
-    short_cross_bar = _bar(symbol="QQQ", close=99.0, minute=3)
+    short_cross_bar = _bar(symbol="SPY", close=99.0, minute=3)
     short_cross_states = {10: _state(short_cross_bar, 10, 100.0)}
     _, short_cross_signals = detector.detect(
         bar=short_cross_bar,
@@ -155,6 +155,55 @@ def test_close_touch_or_cross_trigger_long_and_short() -> None:
     )
     assert len(short_cross_signals) == 1
     assert short_cross_signals[0].side == "SHORT"
+
+
+def test_macro_gate_short_requires_bearish_regime() -> None:
+    route = RouteRule(
+        id="short_with_macro_gate",
+        symbol="SPY",
+        timeframe="1m",
+        outfit_id="route_outfit",
+        key_period=10,
+        side="SHORT",
+        signal_type="automated_short",
+        micro_periods=[10],
+        ignore_close_below_key_when_micro_positive=False,
+        macro_gate="nas",
+        risk_mode="singular_penny_only",
+        stop_offset=0.01,
+    )
+    detector = StrikeDetector(
+        outfits=[OutfitDefinition("route_outfit", (10,), "route", "10")],
+        routes=[route],
+        strict_routing=True,
+    )
+
+    bearish_bar = _bar(symbol="SPY", close=99.0, minute=9)
+    bearish_states = {
+        10: _state(bearish_bar, 10, 100.0),
+        20: _state(bearish_bar, 20, 99.0),
+        100: _state(bearish_bar, 100, 100.0),
+    }
+    _, bearish_signals = detector.detect(
+        bar=bearish_bar,
+        sma_states=bearish_states,
+        history=_history(101.0, 99.0),
+    )
+    assert len(bearish_signals) == 1
+    assert bearish_signals[0].side == "SHORT"
+
+    bullish_bar = _bar(symbol="SPY", close=99.0, minute=10)
+    bullish_states = {
+        10: _state(bullish_bar, 10, 100.0),
+        20: _state(bullish_bar, 20, 101.0),
+        100: _state(bullish_bar, 100, 100.0),
+    }
+    _, bullish_signals = detector.detect(
+        bar=bullish_bar,
+        sma_states=bullish_states,
+        history=_history(101.0, 99.0),
+    )
+    assert bullish_signals == []
 
 
 def test_micro_confirmation_blocks_signal_when_not_positive() -> None:

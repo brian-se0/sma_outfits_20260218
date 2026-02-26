@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from time import monotonic
+from time import monotonic, sleep
 from typing import AsyncIterator, Protocol
 from urllib.parse import urlparse
 
@@ -73,14 +73,31 @@ REQUIRED_WS_BAR_KEYS = frozenset({"T", "S", "t", "o", "h", "l", "c", "v"})
 OPTIONAL_WS_BAR_KEYS = frozenset({"n", "vw"})
 ALLOWED_WS_BAR_KEYS = REQUIRED_WS_BAR_KEYS | OPTIONAL_WS_BAR_KEYS
 
+RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
+
 
 @dataclass(slots=True)
 class AlpacaRESTClient:
     config: AlpacaConfig
     timeout_seconds: int = 30
+    max_request_attempts: int = 5
+    retry_backoff_seconds: float = 1.0
+    max_retry_backoff_seconds: float = 8.0
     _session: requests.Session = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be > 0")
+        if self.max_request_attempts <= 0:
+            raise ValueError("max_request_attempts must be > 0")
+        if self.retry_backoff_seconds < 0:
+            raise ValueError("retry_backoff_seconds must be >= 0")
+        if self.max_retry_backoff_seconds < 0:
+            raise ValueError("max_retry_backoff_seconds must be >= 0")
+        if self.max_retry_backoff_seconds < self.retry_backoff_seconds:
+            raise ValueError(
+                "max_retry_backoff_seconds must be >= retry_backoff_seconds"
+            )
         self._session = requests.Session()
         # Keep networking deterministic and config-driven; do not inherit proxy env vars.
         self._session.trust_env = False
@@ -245,10 +262,9 @@ class AlpacaRESTClient:
         local_start = start_utc.tz_convert(timezone).strftime("%Y-%m-%d")
         local_end = end_utc.tz_convert(timezone).strftime("%Y-%m-%d")
         endpoint = f"{self.config.base_url.rstrip('/')}/v2/calendar"
-        response = self._session.get(
+        response = self._request_with_retries(
             endpoint,
             params={"start": local_start, "end": local_end},
-            timeout=self.timeout_seconds,
         )
         if response.status_code != 200:
             raise RuntimeError(
@@ -305,9 +321,8 @@ class AlpacaRESTClient:
 
     def fetch_open_positions(self) -> list[dict[str, object]]:
         endpoint = f"{self.config.base_url.rstrip('/')}/v2/positions"
-        response = self._session.get(
+        response = self._request_with_retries(
             endpoint,
-            timeout=self.timeout_seconds,
         )
         if response.status_code != 200:
             raise RuntimeError(
@@ -336,10 +351,9 @@ class AlpacaRESTClient:
 
     def fetch_open_orders(self) -> list[dict[str, object]]:
         endpoint = f"{self.config.base_url.rstrip('/')}/v2/orders"
-        response = self._session.get(
+        response = self._request_with_retries(
             endpoint,
             params={"status": "open", "limit": 500, "direction": "desc"},
-            timeout=self.timeout_seconds,
         )
         if response.status_code != 200:
             raise RuntimeError(
@@ -367,10 +381,9 @@ class AlpacaRESTClient:
         return rows
 
     def _get_json(self, endpoint: str, params: dict[str, str | int]) -> dict:
-        response = self._session.get(
+        response = self._request_with_retries(
             endpoint,
             params=params,
-            timeout=self.timeout_seconds,
         )
         if response.status_code != 200:
             raise RuntimeError(
@@ -380,6 +393,56 @@ class AlpacaRESTClient:
         if not isinstance(payload, dict):
             raise RuntimeError(f"Unexpected Alpaca payload type: {type(payload)}")
         return payload
+
+    def _request_with_retries(
+        self,
+        endpoint: str,
+        params: dict[str, str | int] | None = None,
+    ) -> requests.Response:
+        last_exception: requests.RequestException | None = None
+        last_retryable_response: requests.Response | None = None
+        for attempt in range(1, self.max_request_attempts + 1):
+            try:
+                response = self._session.get(
+                    endpoint,
+                    params=params,
+                    timeout=self.timeout_seconds,
+                )
+            except requests.RequestException as exc:
+                last_exception = exc
+                if attempt == self.max_request_attempts:
+                    break
+                sleep(self._retry_delay_seconds(attempt))
+                continue
+
+            if response.status_code in RETRYABLE_HTTP_STATUS_CODES:
+                last_retryable_response = response
+                if attempt == self.max_request_attempts:
+                    break
+                sleep(self._retry_delay_seconds(attempt))
+                continue
+            return response
+
+        if last_retryable_response is not None:
+            raise RuntimeError(
+                "Alpaca request retry budget exhausted "
+                f"({self.max_request_attempts} attempts) for {endpoint}: "
+                f"last_status={last_retryable_response.status_code} "
+                f"last_body={last_retryable_response.text}"
+            )
+        if last_exception is not None:
+            raise RuntimeError(
+                "Alpaca request retry budget exhausted "
+                f"({self.max_request_attempts} attempts) for {endpoint}: "
+                f"last_error={type(last_exception).__name__}: {last_exception}"
+            ) from last_exception
+        raise RuntimeError(
+            f"Alpaca request failed for {endpoint}: no response received"
+        )
+
+    def _retry_delay_seconds(self, attempt: int) -> float:
+        delay = self.retry_backoff_seconds * (2 ** (attempt - 1))
+        return min(delay, self.max_retry_backoff_seconds)
 
 
 @dataclass(slots=True)

@@ -5,6 +5,7 @@ from typing import Any
 
 import pandas as pd
 import pytest
+import requests
 
 from sma_outfits.config.models import AlpacaConfig
 from sma_outfits.data.alpaca_clients import (
@@ -26,16 +27,20 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    def __init__(self, responses: list[_FakeResponse]) -> None:
+    def __init__(self, responses: list[_FakeResponse | Exception]) -> None:
         self._responses = responses
         self.headers: dict[str, str] = {}
         self.calls = 0
         self.call_args: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.trust_env = False
 
     def get(self, *_args: Any, **_kwargs: Any) -> _FakeResponse:
-        response = self._responses[self.calls]
+        response_or_error = self._responses[self.calls]
         self.call_args.append((_args, _kwargs))
         self.calls += 1
+        if isinstance(response_or_error, Exception):
+            raise response_or_error
+        response = response_or_error
         return response
 
 
@@ -365,3 +370,143 @@ def test_rejects_malformed_websocket_bar_payload() -> None:
             },
             market="stocks",
         )
+
+
+def test_retries_transient_connection_error_then_succeeds() -> None:
+    client = AlpacaRESTClient(
+        _config(),
+        max_request_attempts=3,
+        retry_backoff_seconds=0.0,
+        max_retry_backoff_seconds=0.0,
+    )
+    fake_session = _FakeSession(
+        responses=[
+            requests.ConnectionError("remote disconnected"),
+            _FakeResponse(
+                payload={
+                    "bars": {
+                        "SPY": [
+                            {
+                                "t": "2025-01-02T14:30:00Z",
+                                "o": 100.0,
+                                "h": 101.0,
+                                "l": 99.0,
+                                "c": 100.5,
+                                "v": 1000.0,
+                            }
+                        ]
+                    },
+                    "next_page_token": None,
+                }
+            ),
+        ]
+    )
+    client._session = fake_session
+
+    bars = client.fetch_bars(
+        symbol="SPY",
+        start=pd.Timestamp("2025-01-02T14:30:00Z"),
+        end=pd.Timestamp("2025-01-02T14:40:00Z"),
+        timeframe="1m",
+        market="stocks",
+    )
+
+    assert len(bars) == 1
+    assert fake_session.calls == 2
+
+
+def test_retries_retryable_http_status_then_succeeds() -> None:
+    client = AlpacaRESTClient(
+        _config(),
+        max_request_attempts=3,
+        retry_backoff_seconds=0.0,
+        max_retry_backoff_seconds=0.0,
+    )
+    fake_session = _FakeSession(
+        responses=[
+            _FakeResponse(payload={}, status_code=503, text="service unavailable"),
+            _FakeResponse(
+                payload={
+                    "bars": {
+                        "SPY": [
+                            {
+                                "t": "2025-01-02T14:30:00Z",
+                                "o": 100.0,
+                                "h": 101.0,
+                                "l": 99.0,
+                                "c": 100.5,
+                                "v": 1000.0,
+                            }
+                        ]
+                    },
+                    "next_page_token": None,
+                }
+            ),
+        ]
+    )
+    client._session = fake_session
+
+    bars = client.fetch_bars(
+        symbol="SPY",
+        start=pd.Timestamp("2025-01-02T14:30:00Z"),
+        end=pd.Timestamp("2025-01-02T14:40:00Z"),
+        timeframe="1m",
+        market="stocks",
+    )
+
+    assert len(bars) == 1
+    assert fake_session.calls == 2
+
+
+def test_non_retryable_http_status_fails_without_retry() -> None:
+    client = AlpacaRESTClient(
+        _config(),
+        max_request_attempts=3,
+        retry_backoff_seconds=0.0,
+        max_retry_backoff_seconds=0.0,
+    )
+    fake_session = _FakeSession(
+        responses=[
+            _FakeResponse(payload={}, status_code=401, text="unauthorized"),
+            _FakeResponse(payload={}),
+        ]
+    )
+    client._session = fake_session
+
+    with pytest.raises(RuntimeError, match="Alpaca request failed \\(401\\)"):
+        client.fetch_bars(
+            symbol="SPY",
+            start=pd.Timestamp("2025-01-02T14:30:00Z"),
+            end=pd.Timestamp("2025-01-02T14:40:00Z"),
+            timeframe="1m",
+            market="stocks",
+        )
+
+    assert fake_session.calls == 1
+
+
+def test_retry_budget_exhausted_raises_runtime_error() -> None:
+    client = AlpacaRESTClient(
+        _config(),
+        max_request_attempts=2,
+        retry_backoff_seconds=0.0,
+        max_retry_backoff_seconds=0.0,
+    )
+    fake_session = _FakeSession(
+        responses=[
+            requests.ConnectionError("first disconnect"),
+            requests.ConnectionError("second disconnect"),
+        ]
+    )
+    client._session = fake_session
+
+    with pytest.raises(RuntimeError, match="retry budget exhausted"):
+        client.fetch_bars(
+            symbol="SPY",
+            start=pd.Timestamp("2025-01-02T14:30:00Z"),
+            end=pd.Timestamp("2025-01-02T14:40:00Z"),
+            timeframe="1m",
+            market="stocks",
+        )
+
+    assert fake_session.calls == 2

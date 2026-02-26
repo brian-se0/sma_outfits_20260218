@@ -280,6 +280,63 @@ def test_strategy_duplicate_route_key_rejected(tmp_path: Path) -> None:
         load_settings(config_path=config_path, env_path=env_path)
 
 
+def test_strategy_opposing_sides_same_route_key_allowed(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    long_route = {
+        "id": "route-long",
+        "symbol": "SPY",
+        "timeframe": "1m",
+        "outfit_id": "base2_nvda",
+        "key_period": 16,
+        "side": "LONG",
+        "signal_type": "precision_buy",
+        "micro_periods": [16],
+        "ignore_close_below_key_when_micro_positive": False,
+        "macro_gate": "none",
+        "risk_mode": "singular_penny_only",
+        "stop_offset": 0.01,
+    }
+    short_route = {
+        "id": "route-short",
+        "symbol": "SPY",
+        "timeframe": "1m",
+        "outfit_id": "base2_nvda",
+        "key_period": 16,
+        "side": "SHORT",
+        "signal_type": "automated_short",
+        "micro_periods": [16],
+        "ignore_close_below_key_when_micro_positive": False,
+        "macro_gate": "none",
+        "risk_mode": "singular_penny_only",
+        "stop_offset": 0.01,
+    }
+    config = {
+        "strategy": {
+            "strict_routing": True,
+            "routes": [long_route, short_route],
+        }
+    }
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    settings = load_settings(config_path=config_path, env_path=env_path)
+    assert {route.id for route in settings.strategy.routes} == {"route-long", "route-short"}
+    assert {route.side for route in settings.strategy.routes} == {"LONG", "SHORT"}
+
+
 def test_strategy_route_outfit_and_period_membership_validation(tmp_path: Path) -> None:
     env_path = tmp_path / ".env.local"
     env_path.write_text(
