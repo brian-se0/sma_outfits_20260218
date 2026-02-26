@@ -1,0 +1,10 @@
+{
+  "boundary_failures": [],
+  "checked_at": "2026-02-26T02:05:16.273062+00:00",
+  "config": "configs\\settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml",
+  "end": "2025-01-02T21:00:00+00:00",
+  "gap_quality_failures": [],
+  "pairs_checked": 2,
+  "start": "2025-01-02T14:30:00+00:00",
+  "status": "ok"
+}

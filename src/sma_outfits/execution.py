@@ -124,7 +124,11 @@ def resolve_execution_pairs(
 
     missing_symbols = sorted(set(normalized_symbols).difference(configured_symbols))
     missing_timeframes = sorted(set(timeframes).difference(configured_timeframes))
-    if missing_symbols or missing_timeframes:
+    # Replay can receive broad universe/timeframe requests while strict routing
+    # still executes only configured route pairs. Keep hard-fail behavior for
+    # live execution and other strict-scope commands.
+    lenient_scope = command == "replay"
+    if (missing_symbols or missing_timeframes) and not lenient_scope:
         details: list[str] = []
         if missing_symbols:
             details.append("symbols=" + ",".join(missing_symbols))
