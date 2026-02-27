@@ -311,6 +311,28 @@ This table lists (and is not limited to) the ticker symbols first, followed by t
 | TBT    | ProShares UltraShort 20+ Year Treasury |
 | TNX    | 10-Year Treasury Note Yield |
 
+### Alpaca Native Support Audit (as of 2026-02-26)
+
+Support was verified against Alpaca's Trading API assets endpoint contract and symbol-level lookups:
+
+- https://docs.alpaca.markets/reference/getallassets
+- https://docs.alpaca.markets/reference/getassetbyidorname
+
+Tickers from the table above that do **not** have native Alpaca asset support (404 on symbol lookup):
+
+- `DJI`
+- `DXY`
+- `HSI`
+- `IXIC`
+- `SPX`
+- `TNX`
+- `VIX`
+- `XAUUSD`
+
+Symbol normalization note:
+
+- `BRK-B` (README notation) maps to Alpaca's native symbol `BRK.B`.
+
 ## The Systems
 
 This section provides context for the array of systems that contribute to the organization of the major market.

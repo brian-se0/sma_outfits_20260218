@@ -33,3 +33,16 @@ def test_makefile_removes_lane_interface_artifacts() -> None:
     assert "LANE ?=" not in makefile
     assert "LANE_" not in makefile
     assert "--config $(ACTIVE_CONFIG)" in makefile
+
+
+def test_makefile_supports_max_common_profile() -> None:
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+
+    assert (
+        "PROFILE ?= smoke## help: Range profile "
+        "(smoke|day|week|month|max|max_common|custom)."
+    ) in makefile
+    assert "else ifeq ($(PROFILE),max_common)" in makefile
+    assert "PROFILE='max_common' requires DISCOVER_RANGE_OUTPUT with full_range_start." in makefile
+    assert "PROFILE_START := $(COMMON_ANALYSIS_START)" in makefile
+    assert "Use: smoke, day, week, month, max, max_common, custom" in makefile

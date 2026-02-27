@@ -8,15 +8,43 @@ alpaca:
 
 universe:
   symbols:
+    - AAPD
+    - AAPU
     - AAPL
+    - AI
     - AMDL
+    - AMZN
+    - ARM
+    - BABA
+    - BITO
+    - BOIL
+    - BRK.B
+    - COIN
     - CONL
+    - DAX
+    - DRIP
+    - DRN
     - DUST
+    - ENPH
+    - ERX
     - ETHU
+    - GLD
+    - GM
+    - GOOG
     - IYR
+    - GUSH
+    - INTC
+    - LABU
+    - META
+    - MSFT
     - MUU
+    - NFLX
     - NVD
     - NVDX
+    - PYPL
+    - QCOM
+    - RBLX
+    - REK
     - SPXU
     - SPY
     - QQQ
@@ -24,15 +52,28 @@ universe:
     - TNA
     - UPRO
     - TQQQ
+    - TBT
+    - TLT
     - TSLL
+    - TSLQ
     - TSLT
+    - TSM
     - TZA
     - SQQQ
     - UDOW
+    - UNH
+    - UPST
+    - USO
+    - UVXY
+    - UWM
+    - V
+    - VXX
+    - WEBS
     - SDOW
     - SOXL
     - SOXS
     - SVIX
+    - SVXY
     - VIXY
     - XLF
     - JPM
@@ -48,6 +89,7 @@ universe:
     - BTC/USD
     - ETH/USD
   proxy_map:
+    BRK-B: BRK.B
     AMLD: AMDL
     IVR: IYR
     SOX: SMH
@@ -57,20 +99,52 @@ universe:
     DJI: DIA
     VIX: VIXY
   symbol_markets:
+    AAPD: stocks
+    AAPU: stocks
     AAPL: stocks
+    AI: stocks
     AMDL: stocks
+    AMZN: stocks
+    ARM: stocks
+    BABA: stocks
+    BITO: stocks
+    BOIL: stocks
+    BRK.B: stocks
+    COIN: stocks
     CONL: stocks
+    DAX: stocks
+    DRIP: stocks
+    DRN: stocks
     DUST: stocks
+    ENPH: stocks
+    ERX: stocks
     ETHU: stocks
+    GLD: stocks
+    GM: stocks
+    GOOG: stocks
+    GUSH: stocks
+    INTC: stocks
     IYR: stocks
+    LABU: stocks
+    META: stocks
+    MSFT: stocks
     MUU: stocks
+    NFLX: stocks
     NVD: stocks
     NVDX: stocks
+    PYPL: stocks
+    QCOM: stocks
     SPXU: stocks
     SPY: stocks
     QQQ: stocks
+    RBLX: stocks
+    REK: stocks
     DIA: stocks
     TNA: stocks
+    TBT: stocks
+    TLT: stocks
+    TSLQ: stocks
+    TSM: stocks
     UPRO: stocks
     TQQQ: stocks
     TSLL: stocks
@@ -78,10 +152,19 @@ universe:
     TZA: stocks
     SQQQ: stocks
     UDOW: stocks
+    UNH: stocks
+    UPST: stocks
+    USO: stocks
+    UVXY: stocks
+    UWM: stocks
+    V: stocks
+    VXX: stocks
+    WEBS: stocks
     SDOW: stocks
     SOXL: stocks
     SOXS: stocks
     SVIX: stocks
+    SVXY: stocks
     VIXY: stocks
     XLF: stocks
     JPM: stocks

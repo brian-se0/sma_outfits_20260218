@@ -20,12 +20,14 @@ endif
 #   make e2e
 #   make e2e PROFILE=week SYMBOLS=SPY
 #   make e2e PROFILE=max UNIVERSE=all TIMEFRAME_SET=all
+#   make discover-range CONFIG_PROFILE=strict UNIVERSE=all TIMEFRAME_SET=all
+#   make e2e PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all
 #   make e2e PROFILE=max UNIVERSE=all_stocks TIMEFRAME_SET=all
 #   make e2e PROFILE=month UNIVERSE=core_expanded TIMEFRAME_SET=core
 #   make e2e PROFILE=custom START=2025-01-02T14:30:00Z END=2025-01-31T21:00:00Z
 #   make e2e PROFILE=month WARMUP_DAYS=150
 #   make e2e PROFILE=month STAGES=backfill,replay,report
-PROFILE ?= smoke## help: Range profile (smoke|day|week|month|max|custom).
+PROFILE ?= smoke## help: Range profile (smoke|day|week|month|max|max_common|custom).
 UNIVERSE ?= core## help: Symbol universe preset (core|core_expanded|all_stocks|all).
 TIMEFRAME_SET ?= core## help: Timeframe preset (core|all).
 STAGES ?= validate-config,backfill,replay,report## help: e2e stages CSV subset of validate-config,backfill,replay,report.
@@ -66,6 +68,12 @@ FULL_RANGE_START ?= $(FULL_RANGE_START_COMPUTED)## help: Auto-loaded full_range_
 ifeq ($(strip $(FULL_RANGE_START)),)
 FULL_RANGE_START := $(FULL_RANGE_START_COMPUTED)
 endif
+# e2e warmup + reporting window controls:
+# - Analysis window is what report summarizes.
+# - Backfill/replay windows can include additional warmup bars.
+WARMUP_DAYS ?= 120## help: Warmup days before analysis start for e2e.
+COMMON_ANALYSIS_START_COMPUTED := $(shell powershell -NoProfile -Command 'if ("$(FULL_RANGE_START)" -ne "") { $$start=[DateTimeOffset]::Parse("$(FULL_RANGE_START)"); $$days=[double]"$(WARMUP_DAYS)"; [Console]::Out.Write($$start.AddDays($$days).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")) }')
+COMMON_ANALYSIS_START ?= $(COMMON_ANALYSIS_START_COMPUTED)## help: Auto-computed analysis start for PROFILE=max_common from FULL_RANGE_START + WARMUP_DAYS.
 VERIFY_READINESS_ARGS ?=## help: Extra verify-readiness CLI args (for example --require-academic-validation).
 
 ifeq ($(PROFILE),smoke)
@@ -83,6 +91,15 @@ PROFILE_END := 2025-01-31T21:00:00Z
 else ifeq ($(PROFILE),max)
 PROFILE_START := $(MAX_START)
 PROFILE_END := $(MAX_END)
+else ifeq ($(PROFILE),max_common)
+ifeq ($(strip $(FULL_RANGE_START)),)
+$(error PROFILE='max_common' requires DISCOVER_RANGE_OUTPUT with full_range_start. Run: make discover-range CONFIG_PROFILE=$(CONFIG_PROFILE) UNIVERSE=all TIMEFRAME_SET=all)
+endif
+ifeq ($(strip $(COMMON_ANALYSIS_START)),)
+$(error PROFILE='max_common' could not compute analysis start from FULL_RANGE_START='$(FULL_RANGE_START)' and WARMUP_DAYS='$(WARMUP_DAYS)')
+endif
+PROFILE_START := $(COMMON_ANALYSIS_START)
+PROFILE_END := $(MAX_END)
 else ifeq ($(PROFILE),custom)
 ifeq ($(origin START),undefined)
 $(error PROFILE='custom' requires START=YYYY-MM-DDTHH:MM:SSZ)
@@ -93,7 +110,7 @@ endif
 PROFILE_START := $(START)
 PROFILE_END := $(END)
 else
-$(error Unsupported PROFILE='$(PROFILE)'. Use: smoke, day, week, month, max, custom)
+$(error Unsupported PROFILE='$(PROFILE)'. Use: smoke, day, week, month, max, max_common, custom)
 endif
 
 ifeq ($(UNIVERSE),core)
@@ -125,12 +142,8 @@ BACKFILL_TIMEFRAMES ?= $(TIMEFRAMES)## help: Backfill timeframes CSV (defaults t
 REPLAY_SYMBOLS ?= $(SYMBOLS)## help: Replay symbols CSV (defaults to SYMBOLS).
 REPLAY_TIMEFRAMES ?= $(TIMEFRAMES)## help: Replay timeframes CSV (defaults to TIMEFRAMES).
 
-# e2e warmup + reporting window controls:
-# - Analysis window is what report summarizes.
-# - Backfill/replay windows can include additional warmup bars.
 ANALYSIS_START ?= $(START)## help: Analysis/report start for e2e.
 ANALYSIS_END ?= $(END)## help: Analysis/report end for e2e.
-WARMUP_DAYS ?= 120## help: Warmup days before analysis start for e2e.
 WARMUP_START ?= $(shell powershell -NoProfile -Command '$$start=[DateTimeOffset]::Parse("$(ANALYSIS_START)"); $$days=[double]"$(WARMUP_DAYS)"; [Console]::Out.Write($$start.AddDays(-1.0 * $$days).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))')
 BACKFILL_START ?= $(WARMUP_START)
 BACKFILL_END ?= $(ANALYSIS_END)
@@ -148,7 +161,7 @@ REPLAY_SYMBOLS_ARG := $(if $(strip $(REPLAY_SYMBOLS)),--symbols $(REPLAY_SYMBOLS
 REPLAY_TIMEFRAMES_ARG := $(if $(strip $(REPLAY_TIMEFRAMES)),--timeframes $(REPLAY_TIMEFRAMES),)
 
 define run_storage_preflight
-	powershell -NoProfile -Command "$$profile='$(1)'; $$largeProfiles=@('week','month','max','custom'); if (-not ($$largeProfiles -contains $$profile)) { Write-Output ('storage preflight: skipped for PROFILE=' + $$profile); exit 0 }; $$targetPath = [System.IO.Path]::GetFullPath('$(CURDIR)'); $$root = [System.IO.Path]::GetPathRoot($$targetPath); if ([string]::IsNullOrWhiteSpace($$root)) { throw ('Unable to resolve path root for ' + $$targetPath) }; $$driveInfo = [System.IO.DriveInfo]::new($$root); $$freeBytes = [int64]$$driveInfo.AvailableFreeSpace; $$thresholdGb = [double]'$(MIN_FREE_GB)'; $$thresholdBytes = [int64]($$thresholdGb * 1GB); if ($$freeBytes -lt $$thresholdBytes) { throw ('Insufficient free disk space for PROFILE=' + $$profile + ': free=' + $$freeBytes + ' bytes, required>=' + $$thresholdBytes + ' bytes (MIN_FREE_GB=' + $$thresholdGb + ')') }; Write-Output ('storage preflight: ok PROFILE=' + $$profile + ' free_bytes=' + $$freeBytes + ' threshold_bytes=' + $$thresholdBytes + ' root=' + $$root)"
+	powershell -NoProfile -Command "$$profile='$(1)'; $$largeProfiles=@('week','month','max','max_common','custom'); if (-not ($$largeProfiles -contains $$profile)) { Write-Output ('storage preflight: skipped for PROFILE=' + $$profile); exit 0 }; $$targetPath = [System.IO.Path]::GetFullPath('$(CURDIR)'); $$root = [System.IO.Path]::GetPathRoot($$targetPath); if ([string]::IsNullOrWhiteSpace($$root)) { throw ('Unable to resolve path root for ' + $$targetPath) }; $$driveInfo = [System.IO.DriveInfo]::new($$root); $$freeBytes = [int64]$$driveInfo.AvailableFreeSpace; $$thresholdGb = [double]'$(MIN_FREE_GB)'; $$thresholdBytes = [int64]($$thresholdGb * 1GB); if ($$freeBytes -lt $$thresholdBytes) { throw ('Insufficient free disk space for PROFILE=' + $$profile + ': free=' + $$freeBytes + ' bytes, required>=' + $$thresholdBytes + ' bytes (MIN_FREE_GB=' + $$thresholdGb + ')') }; Write-Output ('storage preflight: ok PROFILE=' + $$profile + ' free_bytes=' + $$freeBytes + ' threshold_bytes=' + $$thresholdBytes + ' root=' + $$root)"
 endef
 
 define run_pipeline
@@ -186,7 +199,7 @@ endef
 .PHONY: help venv install validate-config discover-range verify-readiness test dead-code-check backfill replay run-live report migrate-storage-layout preflight-storage e2e clean clean-all
 
 help: ## Print available targets, common variables, and examples.
-	powershell -NoProfile -Command "$$lines = Get-Content -Path 'Makefile'; $$targets = @(); $$vars = @(); foreach ($$line in $$lines) { if ($$line -match '^(?<target>[A-Za-z0-9_.-]+):(?:[^#]|#(?!#))*## (?<desc>.+)$$') { if ($$matches.target -notlike '_*') { $$targets += [PSCustomObject]@{ key = $$matches.target; desc = $$matches.desc } } }; if ($$line -match '^(?<var>[A-Z][A-Z0-9_]*)\s*(?:\?|:|\+)?=\s*.*##\s*help:\s*(?<desc>.+)$$') { $$vars += [PSCustomObject]@{ key = $$matches.var; desc = $$matches.desc } } }; Write-Output 'Targets:'; foreach ($$entry in $$targets) { Write-Output ('  make ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Common variables:'; foreach ($$entry in $$vars) { Write-Output ('  ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Examples:'; $$examples = @('make discover-range CONFIG_PROFILE=strict UNIVERSE=all_stocks TIMEFRAME_SET=all','make discover-range CONFIG_PROFILE=replication UNIVERSE=all_stocks TIMEFRAME_SET=all','make migrate-storage-layout CONFIG_PROFILE=strict','make e2e CONFIG_PROFILE=strict PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all STAGES=validate-config,backfill','make e2e CONFIG_PROFILE=replication PROFILE=month UNIVERSE=core_expanded TIMEFRAME_SET=core','make verify-readiness CONFIG_PROFILE=replication START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all'); foreach ($$e in $$examples) { Write-Output ('  ' + $$e) }"
+	powershell -NoProfile -Command "$$lines = Get-Content -Path 'Makefile'; $$targets = @(); $$vars = @(); foreach ($$line in $$lines) { if ($$line -match '^(?<target>[A-Za-z0-9_.-]+):(?:[^#]|#(?!#))*## (?<desc>.+)$$') { if ($$matches.target -notlike '_*') { $$targets += [PSCustomObject]@{ key = $$matches.target; desc = $$matches.desc } } }; if ($$line -match '^(?<var>[A-Z][A-Z0-9_]*)\s*(?:\?|:|\+)?=\s*.*##\s*help:\s*(?<desc>.+)$$') { $$vars += [PSCustomObject]@{ key = $$matches.var; desc = $$matches.desc } } }; Write-Output 'Targets:'; foreach ($$entry in $$targets) { Write-Output ('  make ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Common variables:'; foreach ($$entry in $$vars) { Write-Output ('  ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Examples:'; $$examples = @('make discover-range CONFIG_PROFILE=strict UNIVERSE=all TIMEFRAME_SET=all','make e2e CONFIG_PROFILE=strict PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all','make discover-range CONFIG_PROFILE=replication UNIVERSE=all_stocks TIMEFRAME_SET=all','make migrate-storage-layout CONFIG_PROFILE=strict','make e2e CONFIG_PROFILE=strict PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all STAGES=validate-config,backfill','make e2e CONFIG_PROFILE=replication PROFILE=month UNIVERSE=core_expanded TIMEFRAME_SET=core','make verify-readiness CONFIG_PROFILE=replication START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all'); foreach ($$e in $$examples) { Write-Output ('  ' + $$e) }"
 
 venv: ## Create/repair .venv and enforce Python 3.14.3.
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; if (!(Test-Path '$(PYTHON)')) { py -3.14 -m venv $(VENV) }; if (!(Test-Path '$(VENV)\\Scripts\\pip.exe')) { & '$(PYTHON)' -m ensurepip --upgrade --default-pip }"
