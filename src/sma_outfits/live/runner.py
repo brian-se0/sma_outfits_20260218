@@ -1067,6 +1067,12 @@ class LiveRunner:
             strict_routing=self.settings.strategy.strict_routing,
             tolerance=self.settings.signal.tolerance,
             trigger_mode=self.settings.strategy.trigger_mode,
+            mixed_trigger_volatility_lookback_bars=(
+                self.settings.strategy.mixed_trigger_volatility_lookback_bars
+            ),
+            mixed_trigger_volatility_percentile_threshold=(
+                self.settings.strategy.mixed_trigger_volatility_percentile_threshold
+            ),
         )
         periods = sorted(self._detector.required_periods())
         if not periods:

@@ -5,24 +5,31 @@
 2. Workflows are only exposed via `Makefile` targets.
 3. Required Alpaca keys are loaded from `.env.local`; missing keys are hard errors.
 
+## Profile Operations
+1. Default CLI/Make operational profile is `context`.
+2. `mixed_trigger` is a frozen parity lane and should remain behaviorally aligned with `context` unless new source evidence requires divergence.
+3. `strict` and `replication` remain baseline comparison lanes for research/robustness validation.
+4. Part-2 initialization runs through `make paper-hardening-init`; Part-2 component checks run through `make test-part2-components`.
+
 ## Data and Market Logic
 1. Session filtering defaults to regular U.S. hours (`09:30-16:00 America/New_York`) for non-crypto symbols.
 2. Crypto symbols are detected by `/` (for example, `BTC/USD`) and bypass regular-session filtering.
-3. SMA input price is always `close`.
-4. Strike trigger uses bar-touch logic with tolerance: `low - tolerance <= sma <= high + tolerance`.
+3. SMA input price is `strategy.price_basis` (`ohlc4` default, `close` optional).
+4. Active strike trigger is `strategy.trigger_mode=close_touch_or_cross`; `signal.trigger_mode` is metadata-only.
 5. Reporting uses canonical `both` attribution only: `attribution_mode="both"` with explicit `strike_attribution` and `close_attribution` payloads.
+6. Free Alpaca runs are bar-based approximations and cannot reproduce tick/second/millisecond source precision.
 
 ## Signal and Risk Logic
 1. Entry is anchored to struck SMA value (rounded to 2 decimals).
-2. Side defaults to `LONG` when `close >= sma`, otherwise `SHORT`.
+2. Side is route-driven (`LONG`/`SHORT` from `strategy.routes[*].side`).
 3. Long invalidation is `entry - 0.01`; short invalidation is `entry + 0.01`.
-4. Partial handling is deterministic: `25%` at `+1R`, stop to breakeven, final at `+3R` or stop.
-5. Timeout termination is deterministic: close after `120` bars without a new directional extreme.
+4. For close-only risk modes (`singular_penny_only`, `penny_reference_break`), `partial_take_r`, `final_take_r`, and `timeout_bars` are inactive defaults.
+5. Close reasons in close-only profiles are expected to be rule-based stops/cuts (for example `penny_reference_break`, `cross_symbol_reference_break`).
 6. Risk migration uses explicit `risk.migrations` rules in config.
 7. Confluence filters are route-local (touch/cross + outfit alignment + volume spike) and disabled by default unless explicitly enabled per route.
 8. Route tolerance applies uniformly across key, micro, and confluence SMA comparisons (LONG uses `close >= sma - tolerance`, SHORT uses `close <= sma + tolerance`).
 9. `atr_dynamic_stop` and `cross_symbol_context` are supported in both replay and live paths when configured.
-10. Canonical SVIX outfit for production/research runs is `26/52/106/211/422/844` (`svix_211_106`) per README; `svix_211_116` is retained only as an explicit comparator/profile variant for RWM-specific archival analysis.
+10. Canonical SVIX outfit notation is `26/52/106/211/422/844` (`svix_211_106`); operative strike level is route/context-specific by profile.
 
 ## Source Catalog Ambiguity
 1. README rows that are malformed or semantically incomplete are preserved in `src/sma_outfits/config/outfits.yaml` with `source_ambiguous: true`.

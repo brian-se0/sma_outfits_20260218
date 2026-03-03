@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -14,6 +15,10 @@ from sma_outfits.config.models import (
     UniverseConfig,
 )
 from sma_outfits.data.storage import StorageManager
+
+
+def _sha256_digest_from_hash_file(path: Path) -> str:
+    return path.read_text(encoding="utf-8").strip().split()[0]
 
 
 class _FakeDiscoveryClient:
@@ -88,6 +93,9 @@ def test_discover_range_writes_manifest_and_hash(tmp_path, monkeypatch, capsys) 
     assert output_path.exists()
     hash_path = output_path.with_suffix(output_path.suffix + ".sha256")
     assert hash_path.exists()
+    assert _sha256_digest_from_hash_file(hash_path) == hashlib.sha256(
+        output_path.read_bytes()
+    ).hexdigest()
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["status"] == "ok"
@@ -171,6 +179,9 @@ def test_verify_readiness_writes_acceptance_manifest(
     assert output_path.exists()
     hash_path = output_path.with_suffix(output_path.suffix + ".sha256")
     assert hash_path.exists()
+    assert _sha256_digest_from_hash_file(hash_path) == hashlib.sha256(
+        output_path.read_bytes()
+    ).hexdigest()
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["status"] == "ok"
     assert payload["pairs_checked"] == 2
@@ -369,7 +380,11 @@ def test_write_run_manifest_writes_expected_payload(
     stdout = capsys.readouterr().out
     assert "run_manifest_path=" in stdout
     assert output_path.exists()
-    assert output_path.with_suffix(".json.sha256").exists()
+    hash_path = output_path.with_suffix(".json.sha256")
+    assert hash_path.exists()
+    assert _sha256_digest_from_hash_file(hash_path) == hashlib.sha256(
+        output_path.read_bytes()
+    ).hexdigest()
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["status"] == "ok"

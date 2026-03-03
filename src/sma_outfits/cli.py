@@ -47,7 +47,10 @@ _STRICT_CONFIG_PATH = Path(
 _REPLICATION_CONFIG_PATH = Path(
     "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml"
 )
-_DEFAULT_CONFIG_PATH = _STRICT_CONFIG_PATH
+_CONTEXT_CONFIG_PATH = Path(
+    "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_context_v1.yaml"
+)
+_DEFAULT_CONFIG_PATH = _CONTEXT_CONFIG_PATH
 
 
 def _load_runtime_settings(config: Path) -> Settings:
@@ -151,8 +154,10 @@ def _write_json_with_hash(
 ) -> tuple[Path, Path, str]:
     output.parent.mkdir(parents=True, exist_ok=True)
     serialized = json.dumps(payload, indent=2, sort_keys=True)
-    output.write_text(serialized + "\n", encoding="utf-8")
-    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    serialized_with_trailing_newline = f"{serialized}\n"
+    serialized_bytes = serialized_with_trailing_newline.encode("utf-8")
+    output.write_bytes(serialized_bytes)
+    digest = hashlib.sha256(serialized_bytes).hexdigest()
     hash_path = output.with_suffix(output.suffix + ".sha256")
     hash_path.write_text(f"{digest}  {output.name}\n", encoding="utf-8")
     return output, hash_path, digest
@@ -330,6 +335,84 @@ def _latest_run_manifest_path(archive_root: Path) -> Path | None:
         reverse=True,
     )
     return candidates[0] if candidates else None
+
+
+def _build_paper_hardening_init_payload(
+    *,
+    settings: Settings,
+    config: Path,
+) -> dict[str, object]:
+    live = settings.live
+    capabilities: dict[str, object] = {
+        "state_persistence_enabled": bool(live.state_persistence_enabled),
+        "state_file": str(live.state_file) if live.state_file else "default:<storage_root>/live_state.json",
+        "state_flush_interval_seconds": float(live.state_flush_interval_seconds),
+        "reconciliation_enabled": bool(live.reconciliation_enabled),
+        "reconciliation_interval_seconds": float(live.reconciliation_interval_seconds),
+        "stale_feed_seconds": int(live.stale_feed_seconds),
+        "symbol_stale_threshold_seconds": int(live.symbol_stale_threshold_seconds),
+        "data_gap_threshold_seconds": int(live.data_gap_threshold_seconds),
+        # Known non-goals in the current implementation contract.
+        "broker_order_submission_enabled": False,
+        "fill_callback_processing_enabled": False,
+        "drawdown_alerting_enabled": False,
+    }
+
+    blocking_gaps: list[dict[str, str]] = []
+    if not bool(live.state_persistence_enabled):
+        blocking_gaps.append(
+            {
+                "id": "state_persistence_disabled",
+                "message": "Enable live.state_persistence_enabled for restart-safe paper runs.",
+            }
+        )
+    if not bool(live.reconciliation_enabled):
+        blocking_gaps.append(
+            {
+                "id": "reconciliation_disabled",
+                "message": "Enable live.reconciliation_enabled for broker/state drift checks.",
+            }
+        )
+
+    blocking_gaps.extend(
+        [
+            {
+                "id": "missing_broker_order_submission",
+                "message": "Implement broker paper order submission path in live execution.",
+            },
+            {
+                "id": "missing_fill_callback_processing",
+                "message": "Implement fill callback ingestion/reconciliation for paper fills.",
+            },
+            {
+                "id": "missing_drawdown_alerting",
+                "message": "Implement drawdown/stale-feed alert channel for unattended runs.",
+            },
+        ]
+    )
+
+    return {
+        "status": "ok",
+        "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
+        "config": str(config),
+        "profile_defaults": {
+            "sessions_regular_only": bool(settings.sessions.regular_only),
+            "trigger_mode": str(settings.strategy.trigger_mode),
+            "strict_routing": bool(settings.strategy.strict_routing),
+            "routes_count": len(settings.strategy.routes),
+        },
+        "capabilities": capabilities,
+        "blocking_gaps": blocking_gaps,
+        "next_commands": [
+            "make test-part2-components",
+            "make run-live CONFIG_PROFILE=context",
+            (
+                "make verify-readiness CONFIG_PROFILE=context "
+                "START=2024-12-31T05:00:00Z END=2026-02-28T00:00:00Z "
+                "UNIVERSE=all TIMEFRAME_SET=all"
+            ),
+        ],
+    }
 
 
 def _validate_run_manifest_payload(payload: dict[str, object]) -> list[str]:
@@ -1233,6 +1316,28 @@ def verify_readiness(
     typer.echo(f"readiness_manifest_path={manifest_path}")
     typer.echo(f"readiness_manifest_sha256={digest}")
     typer.echo(f"readiness_manifest_hash_path={hash_path}")
+
+
+@app.command("paper-hardening-init")
+def paper_hardening_init(
+    config: Path = typer.Option(_DEFAULT_CONFIG_PATH, "--config"),
+    output: Path = typer.Option(
+        Path("artifacts/readiness/paper_hardening_init.json"),
+        "--output",
+        help="Output Part-2 hardening scaffold manifest path",
+    ),
+) -> None:
+    assert_python_runtime()
+    settings = _load_runtime_settings(config)
+    payload = _build_paper_hardening_init_payload(
+        settings=settings,
+        config=config,
+    )
+    manifest_path, hash_path, digest = _write_json_with_hash(payload, output)
+    typer.echo(json.dumps(payload, indent=2))
+    typer.echo(f"paper_hardening_init_path={manifest_path}")
+    typer.echo(f"paper_hardening_init_sha256={digest}")
+    typer.echo(f"paper_hardening_init_hash_path={hash_path}")
 
 
 @app.command("report")

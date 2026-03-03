@@ -561,11 +561,29 @@ class StrategyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     price_basis: Literal["ohlc4", "close"] = "ohlc4"
-    trigger_mode: Literal["close_touch_or_cross"] = "close_touch_or_cross"
+    trigger_mode: Literal["close_touch_or_cross", "mixed_author_v1"] = "close_touch_or_cross"
+    mixed_trigger_volatility_lookback_bars: int = 20
+    mixed_trigger_volatility_percentile_threshold: float = 75.0
     strict_routing: bool = True
     allow_same_bar_exit: bool = False
     ambiguity_policy: Literal["fail"] = "fail"
     routes: list[RouteRule] = Field(default_factory=_default_strategy_routes)
+
+    @field_validator("mixed_trigger_volatility_lookback_bars")
+    @classmethod
+    def _validate_mixed_trigger_lookback(cls, value: int) -> int:
+        if value < 2:
+            raise ValueError("strategy.mixed_trigger_volatility_lookback_bars must be >= 2")
+        return value
+
+    @field_validator("mixed_trigger_volatility_percentile_threshold")
+    @classmethod
+    def _validate_mixed_trigger_percentile(cls, value: float) -> float:
+        if value <= 0 or value >= 100:
+            raise ValueError(
+                "strategy.mixed_trigger_volatility_percentile_threshold must be within (0, 100)"
+            )
+        return value
 
 
 class RiskMigrationConfig(BaseModel):

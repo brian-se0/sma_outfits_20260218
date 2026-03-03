@@ -372,6 +372,9 @@ def test_write_summary_report_both_mode_adds_close_columns_and_sections(tmp_path
     markdown = markdown_path.read_text(encoding="utf-8")
     assert "Strike-Time Attribution" in markdown
     assert "Close-Time Attribution" in markdown
+    assert "Free-Alpaca bar-based proxy (1m+)" in markdown
+    assert "source_alignment_notice" in markdown
+    assert "https://github.com/raultrades/SMA-outfits" in markdown
     assert "position_action_breakdown" in markdown
     assert "Academic Validation Appendix" in markdown
     assert "Claim Scope (Statistical)" in markdown

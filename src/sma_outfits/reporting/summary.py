@@ -173,6 +173,20 @@ def write_summary_report(
         f"# Replay Summary: {label}",
         "",
         "- attribution_mode: `both`",
+        (
+            "- data_precision_notice: `Free-Alpaca bar-based proxy (1m+); does not reproduce "
+            "tick/second/millisecond source execution granularity.`"
+        ),
+        (
+            "- source_alignment_notice: `Context default follows SMA Outfits README "
+            "(linked by @UnfairMarket on 2025-08-05): "
+            "https://github.com/raultrades/SMA-outfits`"
+        ),
+        (
+            "- risk_knob_notice: `For close-only risk modes "
+            "(singular_penny_only, penny_reference_break), partial/final/timeout "
+            "knobs are inactive defaults.`"
+        ),
         "",
     ]
 
