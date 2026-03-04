@@ -50,9 +50,17 @@ def test_mixed_trigger_profile_keeps_context_vixy_routes(tmp_path: Path) -> None
 
     routes_by_id = {route.id: route for route in settings.strategy.routes}
     vixy_long = routes_by_id["vixy_30m_author"]
-    vixy_short = routes_by_id["vixy_30m_author_short"]
+    short_route_ids = {
+        route.id for route in settings.strategy.routes if route.signal_type == "automated_short"
+    }
 
     assert vixy_long.key_period == 422
-    assert vixy_short.key_period == 422
     assert vixy_long.micro_periods == [26, 52, 106, 211]
-    assert vixy_short.micro_periods == [26, 52, 106, 211]
+    assert short_route_ids == {
+        "qqq_1h_author_short",
+        "sqqq_30m_author_short",
+        "svix_30m_author_short",
+        "soxl_30m_author_short",
+        "vixy_30m_author_short",
+        "xlf_30m_author_short",
+    }

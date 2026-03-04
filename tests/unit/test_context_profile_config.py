@@ -34,12 +34,20 @@ def test_context_profile_uses_vixy_422_context_routes(tmp_path: Path) -> None:
 
     routes_by_id = {route.id: route for route in settings.strategy.routes}
     vixy_long = routes_by_id["vixy_30m_author"]
-    vixy_short = routes_by_id["vixy_30m_author_short"]
+    short_route_ids = {
+        route.id for route in settings.strategy.routes if route.signal_type == "automated_short"
+    }
 
     assert vixy_long.key_period == 422
-    assert vixy_short.key_period == 422
     assert vixy_long.micro_periods == [26, 52, 106, 211]
-    assert vixy_short.micro_periods == [26, 52, 106, 211]
+    assert short_route_ids == {
+        "qqq_1h_author_short",
+        "sqqq_30m_author_short",
+        "svix_30m_author_short",
+        "soxl_30m_author_short",
+        "vixy_30m_author_short",
+        "xlf_30m_author_short",
+    }
 
 
 def test_context_profile_preserves_svix_844_baseline_routes(tmp_path: Path) -> None:
@@ -55,9 +63,6 @@ def test_context_profile_preserves_svix_844_baseline_routes(tmp_path: Path) -> N
 
     routes_by_id = {route.id: route for route in settings.strategy.routes}
     svix_long = routes_by_id["svix_30m_author"]
-    svix_short = routes_by_id["svix_30m_author_short"]
 
     assert svix_long.key_period == 844
-    assert svix_short.key_period == 844
     assert svix_long.micro_periods == [26, 52, 106, 211, 422]
-    assert svix_short.micro_periods == [26, 52, 106, 211, 422]

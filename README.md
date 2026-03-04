@@ -9,7 +9,7 @@ Explicit analysis of SMA outfit (blackbox) use in public equity markets for real
 - Precision disclaimer: reports are bar-level approximations (`1m+`) and cannot reproduce tick/second/millisecond execution granularity from source examples.
 - Config contract: no legacy `strategy.mode`; behavior is route/config driven.
 - Profile contract: `context` is the operational default lane for source-aligned runs; `strict` and `replication` remain baseline research lanes.
-- Parity lane contract: `mixed_trigger` is a frozen parity lane retained for auditability and A/B verification against `context`.
+- Deprecation contract: `mixed` and `mixed_trigger` are compatibility aliases that resolve to the same context lane.
 - SVIX contract: outfit label key remains `211` in notation while operative strike levels may be route/context-specific (for example `844` or `422`).
 - Reporting contract: canonical `both` attribution only (`strike_attribution` + `close_attribution`).
 - Live/replay parity: `atr_dynamic_stop` and `cross_symbol_context` are supported in both modes.
@@ -28,7 +28,8 @@ Explicit analysis of SMA outfit (blackbox) use in public equity markets for real
   - `make e2e CONFIG_PROFILE=replication PROFILE=month`
 - Context alignment workflow (operational):
   - `make e2e CONFIG_PROFILE=context PROFILE=month`
-- Mixed trigger workflow (frozen parity):
+- Deprecated aliases (equivalent to context):
+  - `make e2e CONFIG_PROFILE=mixed PROFILE=month`
   - `make e2e CONFIG_PROFILE=mixed_trigger PROFILE=month`
 - Part-2 scaffold init:
   - `make paper-hardening-init CONFIG_PROFILE=context`
@@ -36,7 +37,7 @@ Explicit analysis of SMA outfit (blackbox) use in public equity markets for real
   - `make test-part2-components`
 - Interpretation:
   - Context is the default operational source-alignment lane.
-  - Mixed-trigger should remain parity-checked against context until new source evidence justifies divergence.
+  - Mixed and mixed-trigger are deprecated aliases retained for compatibility only.
   - Strict/replication remain baseline gates for research and robustness review.
 
 ## Repository Structure
