@@ -7,21 +7,15 @@ INSTALL_DEPS := pyproject.toml
 STRICT_CONFIG_PATH ?= configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml## help: Strict canonical config path.
 REPLICATION_CONFIG_PATH ?= configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml## help: Replication canonical config path.
 CONTEXT_CONFIG_PATH ?= configs/settings.jan2025_confluence_atr_svix211_106_crossctx_context_v1.yaml## help: Context canonical config path (official).
-MIXED_CONFIG_PATH ?= configs/settings.jan2025_confluence_atr_svix211_106_crossctx_mixed_trigger_v1.yaml## help: Deprecated mixed alias config path.
-MIXED_TRIGGER_CONFIG_PATH ?= $(MIXED_CONFIG_PATH)## help: Deprecated mixed_trigger alias config path.
-CONFIG_PROFILE ?= context## help: Config profile selector (strict|replication|context); aliases: mixed, mixed_trigger.
+CONFIG_PROFILE ?= context## help: Config profile selector (strict|replication|context).
 ifeq ($(CONFIG_PROFILE),strict)
 ACTIVE_CONFIG := $(STRICT_CONFIG_PATH)
 else ifeq ($(CONFIG_PROFILE),replication)
 ACTIVE_CONFIG := $(REPLICATION_CONFIG_PATH)
 else ifeq ($(CONFIG_PROFILE),context)
 ACTIVE_CONFIG := $(CONTEXT_CONFIG_PATH)
-else ifeq ($(CONFIG_PROFILE),mixed)
-ACTIVE_CONFIG := $(CONTEXT_CONFIG_PATH)
-else ifeq ($(CONFIG_PROFILE),mixed_trigger)
-ACTIVE_CONFIG := $(CONTEXT_CONFIG_PATH)
 else
-$(error Unsupported CONFIG_PROFILE='$(CONFIG_PROFILE)'. Use: strict, replication, context (aliases: mixed, mixed_trigger))
+$(error Unsupported CONFIG_PROFILE='$(CONFIG_PROFILE)'. Use: strict, replication, context)
 endif
 
 # e2e flag-driven defaults

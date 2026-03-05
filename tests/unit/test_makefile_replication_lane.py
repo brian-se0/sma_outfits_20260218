@@ -18,10 +18,6 @@ def test_makefile_uses_profile_based_active_config_mapping() -> None:
         "CONTEXT_CONFIG_PATH ?= "
         "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_context_v1.yaml"
     ) in makefile
-    assert (
-        "MIXED_CONFIG_PATH ?= "
-        "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_mixed_trigger_v1.yaml"
-    ) in makefile
     assert "CONFIG_PROFILE ?= context" in makefile
     assert "ifeq ($(CONFIG_PROFILE),strict)" in makefile
     assert "ACTIVE_CONFIG := $(STRICT_CONFIG_PATH)" in makefile
@@ -29,12 +25,8 @@ def test_makefile_uses_profile_based_active_config_mapping() -> None:
     assert "ACTIVE_CONFIG := $(REPLICATION_CONFIG_PATH)" in makefile
     assert "else ifeq ($(CONFIG_PROFILE),context)" in makefile
     assert "ACTIVE_CONFIG := $(CONTEXT_CONFIG_PATH)" in makefile
-    assert "else ifeq ($(CONFIG_PROFILE),mixed)" in makefile
-    assert "ACTIVE_CONFIG := $(CONTEXT_CONFIG_PATH)" in makefile
-    assert "else ifeq ($(CONFIG_PROFILE),mixed_trigger)" in makefile
-    assert "ACTIVE_CONFIG := $(CONTEXT_CONFIG_PATH)" in makefile
     assert (
-        "$(error Unsupported CONFIG_PROFILE='$(CONFIG_PROFILE)'. Use: strict, replication, context (aliases: mixed, mixed_trigger))"
+        "$(error Unsupported CONFIG_PROFILE='$(CONFIG_PROFILE)'. Use: strict, replication, context)"
     ) in makefile
     assert "$(eval PIPE_CONFIG := $(ACTIVE_CONFIG))" in makefile
     assert "$(eval PIPE_COMMAND := make e2e CONFIG_PROFILE=$(CONFIG_PROFILE))" in makefile

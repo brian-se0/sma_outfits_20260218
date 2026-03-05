@@ -18,10 +18,10 @@ Phase 1 delivered a stable, reproducible backtesting workflow and a finalized pr
 - Reasoning: This was explicitly adopted as a project gate: no live progression without statistically significant alpha.
 
 3. Set `context` as canonical config profile.
-- Decision: `context` is the main profile. `mixed` and `mixed_trigger` are deprecated aliases.
-- Reasoning: `context` and `mixed_trigger` became effectively redundant in behavior/outputs; maintaining separate active lanes added complexity without measurable benefit.
+- Decision: `context` is the main profile and only `strict|context|replication` are supported.
+- Reasoning: mixed profile aliases became redundant and were removed to keep the profile contract unambiguous.
 - Implemented in:
-  - `Makefile` (`CONFIG_PROFILE ?= context`; alias mapping for `mixed` and `mixed_trigger`)
+  - `Makefile` (`CONFIG_PROFILE ?= context`; explicit support only for `strict|context|replication`)
   - `src/sma_outfits/cli.py` default profile/config alignment
   - `README.md`, `ASSUMPTIONS.md`, and `make_commands.md`
 
@@ -33,7 +33,7 @@ Phase 1 delivered a stable, reproducible backtesting workflow and a finalized pr
 - Decision: No global route-level 211 conversion.
 - Reasoning: Source evidence supports 211 as outfit notation/label but not a universal operative trigger for all actions/timeframes.
 
-6. Use mixed trigger concept where volatility can require candle-close confirmation.
+6. Use volatility-conditioned trigger logic where required for candle-close confirmation.
 - Decision: Preserve conditional trigger logic (crossover/OHLC-touch + volatility close confirmation behavior) where configured.
 - Reasoning: Best match to sourced descriptions while remaining implementable with free-data constraints.
 

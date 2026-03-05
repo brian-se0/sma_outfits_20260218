@@ -7,7 +7,7 @@
 
 ## Profile Operations
 1. Default CLI/Make operational profile is `context`.
-2. `context` is the official operational lane; `mixed` and `mixed_trigger` are deprecated aliases that should remain behaviorally identical for compatibility.
+2. `context` is the official operational lane; only `strict`, `context`, and `replication` are supported profiles.
 3. `strict` and `replication` remain baseline comparison lanes for research/robustness validation.
 4. Part-2 initialization runs through `make paper-hardening-init`; Part-2 component checks run through `make test-part2-components`.
 
