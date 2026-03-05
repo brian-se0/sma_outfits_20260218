@@ -66,3 +66,25 @@ def test_makefile_exposes_part2_hardening_targets() -> None:
     assert "test-part2-components: install ##" in makefile
     assert "-m sma_outfits.cli paper-hardening-init --config $(ACTIVE_CONFIG)" in makefile
     assert "-m sma_outfits.cli run-live --config $(ACTIVE_CONFIG) $(RUN_LIVE_ARGS)" in makefile
+
+
+def test_makefile_exposes_phase1_close_target() -> None:
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+
+    assert "PHASE1_CLOSE_PROFILE ?= custom" in makefile
+    assert "PHASE1_CLOSE_START ?= 2022-03-31T15:30:00Z" in makefile
+    assert "PHASE1_CLOSE_END ?= 2026-02-28T23:16:28Z" in makefile
+    assert "PHASE1_CLOSE_SYMBOLS ?= QQQ,RWM,SVIX,SQQQ,TQQQ,IWM,XLF,SOXL,SPY,UPRO,VIXY" in makefile
+    assert "PHASE1_CLOSE_TIMEFRAMES ?= 30m,1h" in makefile
+    assert "PHASE1_CLOSE_STAGES ?= validate-config,backfill,replay,report" in makefile
+    assert "PHASE1_CLOSE_OUTPUT ?= artifacts/readiness/phase1_closure_acceptance.json" in makefile
+    assert "PHASE1_CLOSE_LABEL ?= phase1close" in makefile
+    assert "PHASE1_CLOSE_ARCHIVE_ROOT ?= audit/phase1_close" in makefile
+    assert (
+        "phase1-close: ## Run isolated 3-profile closure protocol twice and verify deterministic readiness."
+    ) in makefile
+    assert ".PHONY:" in makefile
+    assert " phase1-close " in makefile
+    assert "powershell -NoProfile -File scripts/phase1_close.ps1" in makefile
+    assert "-MakeCommand \"$(MAKE)\"" in makefile
+    assert "-ArchiveRoot \"$(PHASE1_CLOSE_ARCHIVE_ROOT)\"" in makefile

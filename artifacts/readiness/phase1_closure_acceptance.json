@@ -1,0 +1,193 @@
+﻿{
+    "status":  "ok",
+    "checked_at":  "2026-03-05T21:01:12.2114392Z",
+    "command":  "make phase1-close",
+    "profile":  "custom",
+    "start":  "2022-03-31T15:30:00Z",
+    "end":  "2026-02-28T23:16:28Z",
+    "symbols":  "QQQ,RWM,SVIX,SQQQ,TQQQ,IWM,XLF,SOXL,SPY,UPRO,VIXY",
+    "timeframes":  "30m,1h",
+    "stages":  "validate-config,backfill,replay,report",
+    "verify_readiness_args":  "",
+    "output_label":  "phase1close",
+    "archive_root":  "D:\\sma_outfits_20260218\\audit\\phase1_close",
+    "archive_run_root":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z",
+    "runs":  [
+                 {
+                     "profile":  "strict",
+                     "pass":  "iso1",
+                     "manifest":  "artifacts/readiness/readiness_acceptance_strict_phase1close_iso1.json",
+                     "manifest_sha256_path":  "artifacts/readiness/readiness_acceptance_strict_phase1close_iso1.json.sha256",
+                     "archived_manifest":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_strict_phase1close_iso1.json",
+                     "archived_manifest_sha256":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_strict_phase1close_iso1.json.sha256",
+                     "status":  "ok",
+                     "ready":  true,
+                     "blocking_reasons":  [
+
+                                          ],
+                     "max_q_value":  0.015189086464336254,
+                     "min_fold_trade_count":  15,
+                     "boundary_failures_count":  0,
+                     "gap_quality_failures_count":  0,
+                     "closed_positions":  169,
+                     "total_signals":  169,
+                     "total_strikes":  169,
+                     "event_hashes":  {
+                                          "artifacts\\svix211_106\\events\\positions.jsonl":  "717ca34c98f398c83e7c357e2b51a12aa71cf20af79674e53f1778f6ed4113ef",
+                                          "artifacts\\svix211_106\\events\\strikes.jsonl":  "d780dcd48da3351b3fab93825091da7721732323af8cedee1fa0b4fa0bfc31a3",
+                                          "artifacts\\svix211_106\\events\\signals.jsonl":  "e7a40596352ed7a5ea51f6e46b8f36c9dcf27c84359ad74a39f470d8dc45e518"
+                                      }
+                 },
+                 {
+                     "profile":  "context",
+                     "pass":  "iso1",
+                     "manifest":  "artifacts/readiness/readiness_acceptance_context_phase1close_iso1.json",
+                     "manifest_sha256_path":  "artifacts/readiness/readiness_acceptance_context_phase1close_iso1.json.sha256",
+                     "archived_manifest":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_context_phase1close_iso1.json",
+                     "archived_manifest_sha256":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_context_phase1close_iso1.json.sha256",
+                     "status":  "ok",
+                     "ready":  true,
+                     "blocking_reasons":  [
+
+                                          ],
+                     "max_q_value":  0.017535466684499013,
+                     "min_fold_trade_count":  18,
+                     "boundary_failures_count":  0,
+                     "gap_quality_failures_count":  0,
+                     "closed_positions":  167,
+                     "total_signals":  167,
+                     "total_strikes":  167,
+                     "event_hashes":  {
+                                          "artifacts\\svix211_106\\events\\positions.jsonl":  "5601e8e118947d4e0cd5d5786081e0465086acb4f080d74d74efd9fd33e15805",
+                                          "artifacts\\svix211_106\\events\\strikes.jsonl":  "82edc3260510e80bf77b78f27ab7d6963ab315cd26566fdb2267e929254c6d87",
+                                          "artifacts\\svix211_106\\events\\signals.jsonl":  "0ab8e76174789a13b0b73d03deb1f8251ac30e0a67575dfd819371efb9fbaf28"
+                                      }
+                 },
+                 {
+                     "profile":  "replication",
+                     "pass":  "iso1",
+                     "manifest":  "artifacts/readiness/readiness_acceptance_replication_phase1close_iso1.json",
+                     "manifest_sha256_path":  "artifacts/readiness/readiness_acceptance_replication_phase1close_iso1.json.sha256",
+                     "archived_manifest":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_replication_phase1close_iso1.json",
+                     "archived_manifest_sha256":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_replication_phase1close_iso1.json.sha256",
+                     "status":  "ok",
+                     "ready":  true,
+                     "blocking_reasons":  [
+
+                                          ],
+                     "max_q_value":  0.017535466684499013,
+                     "min_fold_trade_count":  18,
+                     "boundary_failures_count":  0,
+                     "gap_quality_failures_count":  0,
+                     "closed_positions":  167,
+                     "total_signals":  167,
+                     "total_strikes":  167,
+                     "event_hashes":  {
+                                          "artifacts\\svix211_106\\events\\positions.jsonl":  "5601e8e118947d4e0cd5d5786081e0465086acb4f080d74d74efd9fd33e15805",
+                                          "artifacts\\svix211_106\\events\\strikes.jsonl":  "82edc3260510e80bf77b78f27ab7d6963ab315cd26566fdb2267e929254c6d87",
+                                          "artifacts\\svix211_106\\events\\signals.jsonl":  "0ab8e76174789a13b0b73d03deb1f8251ac30e0a67575dfd819371efb9fbaf28"
+                                      }
+                 },
+                 {
+                     "profile":  "strict",
+                     "pass":  "iso2",
+                     "manifest":  "artifacts/readiness/readiness_acceptance_strict_phase1close_iso2.json",
+                     "manifest_sha256_path":  "artifacts/readiness/readiness_acceptance_strict_phase1close_iso2.json.sha256",
+                     "archived_manifest":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_strict_phase1close_iso2.json",
+                     "archived_manifest_sha256":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_strict_phase1close_iso2.json.sha256",
+                     "status":  "ok",
+                     "ready":  true,
+                     "blocking_reasons":  [
+
+                                          ],
+                     "max_q_value":  0.015189086464336254,
+                     "min_fold_trade_count":  15,
+                     "boundary_failures_count":  0,
+                     "gap_quality_failures_count":  0,
+                     "closed_positions":  169,
+                     "total_signals":  169,
+                     "total_strikes":  169,
+                     "event_hashes":  {
+                                          "artifacts\\svix211_106\\events\\positions.jsonl":  "717ca34c98f398c83e7c357e2b51a12aa71cf20af79674e53f1778f6ed4113ef",
+                                          "artifacts\\svix211_106\\events\\strikes.jsonl":  "d780dcd48da3351b3fab93825091da7721732323af8cedee1fa0b4fa0bfc31a3",
+                                          "artifacts\\svix211_106\\events\\signals.jsonl":  "e7a40596352ed7a5ea51f6e46b8f36c9dcf27c84359ad74a39f470d8dc45e518"
+                                      }
+                 },
+                 {
+                     "profile":  "context",
+                     "pass":  "iso2",
+                     "manifest":  "artifacts/readiness/readiness_acceptance_context_phase1close_iso2.json",
+                     "manifest_sha256_path":  "artifacts/readiness/readiness_acceptance_context_phase1close_iso2.json.sha256",
+                     "archived_manifest":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_context_phase1close_iso2.json",
+                     "archived_manifest_sha256":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_context_phase1close_iso2.json.sha256",
+                     "status":  "ok",
+                     "ready":  true,
+                     "blocking_reasons":  [
+
+                                          ],
+                     "max_q_value":  0.017535466684499013,
+                     "min_fold_trade_count":  18,
+                     "boundary_failures_count":  0,
+                     "gap_quality_failures_count":  0,
+                     "closed_positions":  167,
+                     "total_signals":  167,
+                     "total_strikes":  167,
+                     "event_hashes":  {
+                                          "artifacts\\svix211_106\\events\\positions.jsonl":  "5601e8e118947d4e0cd5d5786081e0465086acb4f080d74d74efd9fd33e15805",
+                                          "artifacts\\svix211_106\\events\\strikes.jsonl":  "82edc3260510e80bf77b78f27ab7d6963ab315cd26566fdb2267e929254c6d87",
+                                          "artifacts\\svix211_106\\events\\signals.jsonl":  "0ab8e76174789a13b0b73d03deb1f8251ac30e0a67575dfd819371efb9fbaf28"
+                                      }
+                 },
+                 {
+                     "profile":  "replication",
+                     "pass":  "iso2",
+                     "manifest":  "artifacts/readiness/readiness_acceptance_replication_phase1close_iso2.json",
+                     "manifest_sha256_path":  "artifacts/readiness/readiness_acceptance_replication_phase1close_iso2.json.sha256",
+                     "archived_manifest":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_replication_phase1close_iso2.json",
+                     "archived_manifest_sha256":  "D:\\sma_outfits_20260218\\audit\\phase1_close\\20260305T182417Z\\readiness_acceptance_replication_phase1close_iso2.json.sha256",
+                     "status":  "ok",
+                     "ready":  true,
+                     "blocking_reasons":  [
+
+                                          ],
+                     "max_q_value":  0.017535466684499013,
+                     "min_fold_trade_count":  18,
+                     "boundary_failures_count":  0,
+                     "gap_quality_failures_count":  0,
+                     "closed_positions":  167,
+                     "total_signals":  167,
+                     "total_strikes":  167,
+                     "event_hashes":  {
+                                          "artifacts\\svix211_106\\events\\positions.jsonl":  "5601e8e118947d4e0cd5d5786081e0465086acb4f080d74d74efd9fd33e15805",
+                                          "artifacts\\svix211_106\\events\\strikes.jsonl":  "82edc3260510e80bf77b78f27ab7d6963ab315cd26566fdb2267e929254c6d87",
+                                          "artifacts\\svix211_106\\events\\signals.jsonl":  "0ab8e76174789a13b0b73d03deb1f8251ac30e0a67575dfd819371efb9fbaf28"
+                                      }
+                 }
+             ],
+    "determinism":  [
+                        {
+                            "profile":  "strict",
+                            "stable":  true,
+                            "details":  [
+
+                                        ]
+                        },
+                        {
+                            "profile":  "context",
+                            "stable":  true,
+                            "details":  [
+
+                                        ]
+                        },
+                        {
+                            "profile":  "replication",
+                            "stable":  true,
+                            "details":  [
+
+                                        ]
+                        }
+                    ],
+    "failures":  [
+
+                 ]
+}

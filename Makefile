@@ -81,6 +81,15 @@ VERIFY_READINESS_ARGS ?=## help: Extra verify-readiness CLI args (for example --
 PAPER_HARDENING_INIT_OUTPUT ?= artifacts/readiness/paper_hardening_init.json## help: Part-2 hardening scaffold manifest output path.
 PART2_TEST_PATHS ?= tests/integration/test_live_pipeline_mocked.py tests/unit/test_cli_readiness.py tests/integration/test_verify_readiness_academic_gate.py## help: Pytest paths for Part-2 component checks.
 RUN_LIVE_ARGS ?=## help: Extra run-live CLI args (for example --runtime-minutes 30 --lookback-hours 8).
+PHASE1_CLOSE_PROFILE ?= custom## help: e2e profile for phase1-close protocol.
+PHASE1_CLOSE_START ?= 2022-03-31T15:30:00Z## help: Phase-1 closure protocol start timestamp.
+PHASE1_CLOSE_END ?= 2026-02-28T23:16:28Z## help: Phase-1 closure protocol end timestamp.
+PHASE1_CLOSE_SYMBOLS ?= QQQ,RWM,SVIX,SQQQ,TQQQ,IWM,XLF,SOXL,SPY,UPRO,VIXY## help: Phase-1 closure protocol symbols CSV.
+PHASE1_CLOSE_TIMEFRAMES ?= 30m,1h## help: Phase-1 closure protocol timeframes CSV.
+PHASE1_CLOSE_STAGES ?= validate-config,backfill,replay,report## help: e2e stages for phase1-close protocol.
+PHASE1_CLOSE_OUTPUT ?= artifacts/readiness/phase1_closure_acceptance.json## help: phase1-close summary JSON path.
+PHASE1_CLOSE_LABEL ?= phase1close## help: Manifest label suffix for phase1-close outputs.
+PHASE1_CLOSE_ARCHIVE_ROOT ?= audit/phase1_close## help: Non-cleaned root path for per-pass phase1-close manifests.
 
 ifeq ($(PROFILE),smoke)
 PROFILE_START := 2025-01-02T14:30:00Z
@@ -202,7 +211,7 @@ $(eval PIPE_REPORT_RANGE := $(REPORT_RANGE_FOR_E2E))
 $(eval PIPE_COMMAND := make e2e CONFIG_PROFILE=$(CONFIG_PROFILE))
 endef
 
-.PHONY: help venv install validate-config discover-range verify-readiness paper-hardening-init test-part2-components test dead-code-check backfill replay run-live report migrate-storage-layout preflight-storage e2e clean clean-all
+.PHONY: help venv install validate-config discover-range verify-readiness paper-hardening-init test-part2-components test dead-code-check backfill replay run-live report migrate-storage-layout preflight-storage e2e phase1-close clean clean-all
 
 help: ## Print available targets, common variables, and examples.
 	powershell -NoProfile -Command "$$lines = Get-Content -Path 'Makefile'; $$targets = @(); $$vars = @(); foreach ($$line in $$lines) { if ($$line -match '^(?<target>[A-Za-z0-9_.-]+):(?:[^#]|#(?!#))*## (?<desc>.+)$$') { if ($$matches.target -notlike '_*') { $$targets += [PSCustomObject]@{ key = $$matches.target; desc = $$matches.desc } } }; if ($$line -match '^(?<var>[A-Z][A-Z0-9_]*)\s*(?:\?|:|\+)?=\s*.*##\s*help:\s*(?<desc>.+)$$') { $$vars += [PSCustomObject]@{ key = $$matches.var; desc = $$matches.desc } } }; Write-Output 'Targets:'; foreach ($$entry in $$targets) { Write-Output ('  make ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Common variables:'; foreach ($$entry in $$vars) { Write-Output ('  ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Examples:'; $$examples = @('make discover-range CONFIG_PROFILE=strict UNIVERSE=all TIMEFRAME_SET=all','make e2e CONFIG_PROFILE=strict PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all','make discover-range CONFIG_PROFILE=replication UNIVERSE=all_stocks TIMEFRAME_SET=all','make e2e CONFIG_PROFILE=context PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all','make migrate-storage-layout CONFIG_PROFILE=strict','make e2e CONFIG_PROFILE=strict PROFILE=custom START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all STAGES=validate-config,backfill','make e2e CONFIG_PROFILE=replication PROFILE=month UNIVERSE=core_expanded TIMEFRAME_SET=core','make verify-readiness CONFIG_PROFILE=replication START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all'); foreach ($$e in $$examples) { Write-Output ('  ' + $$e) }"
@@ -260,8 +269,12 @@ e2e: preflight-storage ## Run staged non-live pipeline and write run manifest.
 	$(call set_pipe_context_e2e)
 	$(call run_pipeline)
 
+phase1-close: ## Run isolated 3-profile closure protocol twice and verify deterministic readiness.
+	powershell -NoProfile -File scripts/phase1_close.ps1 -MakeCommand "$(MAKE)" -Profile "$(PHASE1_CLOSE_PROFILE)" -Start "$(PHASE1_CLOSE_START)" -End "$(PHASE1_CLOSE_END)" -Symbols "$(PHASE1_CLOSE_SYMBOLS)" -Timeframes "$(PHASE1_CLOSE_TIMEFRAMES)" -Stages "$(PHASE1_CLOSE_STAGES)" -VerifyReadinessArgs "$(VERIFY_READINESS_ARGS)" -OutputPath "$(PHASE1_CLOSE_OUTPUT)" -OutputLabel "$(PHASE1_CLOSE_LABEL)" -ArchiveRoot "$(PHASE1_CLOSE_ARCHIVE_ROOT)"
+
 clean: ## Remove artifacts, caches, and build outputs (keeps .venv).
 	powershell -NoProfile -Command "$$targets = @('artifacts', '.tmp', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'htmlcov', 'build', 'dist'); foreach ($$t in $$targets) { if (Test-Path -LiteralPath $$t) { cmd /d /c ('rmdir /s /q ""{0}""' -f $$t) | Out-Null; if (Test-Path -LiteralPath $$t) { throw ('Failed to remove ' + $$t) } } }; $$scanRoots = @(Get-ChildItem -Path . -Directory -Force | Where-Object { $$_.Name -notin @('.venv', '.git') } | ForEach-Object { $$_.FullName }); if ($$scanRoots.Count -gt 0) { Get-ChildItem -Path $$scanRoots -Recurse -Directory -Filter '__pycache__' -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem -Path $$scanRoots -Recurse -File -Include '*.pyc','*.pyo' -Force -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue }; Get-ChildItem -Path . -Directory -Filter '*.egg-info' -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem -Path . -File -Include '*.pyc','*.pyo' -Force -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue"
 
 clean-all: clean ## Run clean and also remove .venv.
 	powershell -NoProfile -Command "if (Test-Path '$(VENV)') { Remove-Item -Recurse -Force '$(VENV)' }"
+

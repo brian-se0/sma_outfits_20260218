@@ -1,0 +1,77 @@
+{
+  "academic_validation": {
+    "blocking_reasons": [],
+    "bootstrap_p_value": 0.0001,
+    "fdr_summary": {
+      "all_pass": true,
+      "max_q_value": 0.017535466684499013,
+      "method": "fdr_bh",
+      "qvalue_threshold": 0.05
+    },
+    "fold_count": 4,
+    "min_fold_trade_count": 18,
+    "ready": true,
+    "wfo_feasibility": {
+      "available_months": 47,
+      "is_feasible": true,
+      "max_feasible_folds": 3,
+      "required_months_for_min_folds": 47
+    }
+  },
+  "artifact_hashes": {
+    "artifacts\\readiness\\readiness_acceptance_context_phase1close_iso2_coverage_details.csv": "be382943f0422d98d5ce7c912ef14b13db4dc89b98a03ce5a63f8c9e51aabea6",
+    "artifacts\\readiness\\readiness_acceptance_context_phase1close_iso2_coverage_quality.json": "55f2d3fa9efa1838a363fff608c546acfaaf76d29bc0b2031a059f911f958051",
+    "artifacts\\svix211_106\\events\\positions.jsonl": "5601e8e118947d4e0cd5d5786081e0465086acb4f080d74d74efd9fd33e15805",
+    "artifacts\\svix211_106\\events\\signals.jsonl": "0ab8e76174789a13b0b73d03deb1f8251ac30e0a67575dfd819371efb9fbaf28",
+    "artifacts\\svix211_106\\events\\strikes.jsonl": "82edc3260510e80bf77b78f27ab7d6963ab315cd26566fdb2267e929254c6d87",
+    "artifacts\\svix211_106\\reports\\20211201T153000_20260228T231628.csv": "1ef8a2ea50c6840fb046f550cbf4e0d2ca6e65523fba038119b8377c8615823f",
+    "artifacts\\svix211_106\\reports\\20211201T153000_20260228T231628.md": "13b3901332550601972f3e285b24e4ba7455df9ebd73e0a2f2595ecc7adb3312",
+    "artifacts\\svix211_106\\reports\\20211201T153000_20260228T231628_academic_validation.json": "70108d967f5935f9de7ec5f9fe190f985521c0dfca8d275db37ace553424fba2",
+    "artifacts\\svix211_106\\reports\\20211201T153000_20260228T231628_bootstrap_bins.csv": "45d16ed2738242b96d96659d1ae53d7a1cd2354b33aa17440d2438b7d9fc5986",
+    "artifacts\\svix211_106\\reports\\20211201T153000_20260228T231628_pvalues.csv": "de96ed4203af60976130c6dc51522866349868ede8a783474dac355505ac2db3",
+    "artifacts\\svix211_106\\reports\\20211201T153000_20260228T231628_wfo_table.csv": "aace5b0ce23bea53be8c1f593b2e66e6f38eef3084fd9888879af9693f47ed31",
+    "artifacts\\svix211_106\\reports\\20220331_20260228.csv": "f2c1e953262cbc51f8186c87164cdb5b46447374c2bcf70660e5cf84444290a0",
+    "artifacts\\svix211_106\\reports\\20220331_20260228.md": "6c7818e1a3ba8b70fd839b08f7be43440fc89e45a1e64ad0d01c09626ace90b6",
+    "artifacts\\svix211_106\\reports\\20220331_20260228_academic_validation.json": "c451013ef22e3c92634299b1c7dfa1d2a7606d37256b8823a264bcf9828d2a03",
+    "artifacts\\svix211_106\\reports\\20220331_20260228_bootstrap_bins.csv": "9830152b21b11b2f3cc0e4c68561d8a55a11b6ff6dae1a3144019819dde54725",
+    "artifacts\\svix211_106\\reports\\20220331_20260228_pvalues.csv": "0fd190306f3b1c68b8a70216251d89322fbb53ebcee7a7f9c47792e6e3a8c1fa",
+    "artifacts\\svix211_106\\reports\\20220331_20260228_wfo_table.csv": "cbd14a1c92ca6a175e77045892c3fcb09596786b96e8926c6fbafff421bc2302",
+    "artifacts\\svix211_106\\reports\\figures\\20211201T153000_20260228T231628_bootstrap_hist.png": "9ac743b0527c7aacf0807ec3ba41e7d1168dfffcd4195c466c6f3e7db38b873a",
+    "artifacts\\svix211_106\\reports\\figures\\20220331_20260228_bootstrap_hist.png": "ce42f8bd98b787c2c8688156190bbcc104104b289c3545750dc76e6508b1dc3a",
+    "artifacts\\svix211_106\\runs\\20260305T203047Z\\run_manifest.json": "9264870128fb1a4632463e6f120de9072d30e3da250c70e3946e75b67704118d"
+  },
+  "boundary_failures_count": 0,
+  "checked_at": "2026-03-05T20:31:08.367834+00:00",
+  "config": "configs\\settings.jan2025_confluence_atr_svix211_106_crossctx_context_v1.yaml",
+  "coverage_details_csv": "artifacts\\readiness\\readiness_acceptance_context_phase1close_iso2_coverage_details.csv",
+  "coverage_quality_json": "artifacts\\readiness\\readiness_acceptance_context_phase1close_iso2_coverage_quality.json",
+  "end": "2026-02-28T23:16:28+00:00",
+  "gap_quality_failures_count": 0,
+  "pairs_checked": 22,
+  "run_manifest_path": "artifacts\\svix211_106\\runs\\20260305T203047Z\\run_manifest.json",
+  "start": "2022-03-31T15:30:00+00:00",
+  "status": "ok",
+  "stock_symbols": [
+    "QQQ",
+    "RWM",
+    "SVIX",
+    "SQQQ",
+    "TQQQ",
+    "IWM",
+    "XLF",
+    "SOXL",
+    "SPY",
+    "UPRO",
+    "VIXY"
+  ],
+  "summary_snapshot": {
+    "attribution_mode": "both",
+    "closed_positions": 167,
+    "total_signals": 167,
+    "total_strikes": 167
+  },
+  "timeframes": [
+    "30m",
+    "1h"
+  ]
+}
