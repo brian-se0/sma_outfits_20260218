@@ -2,6 +2,16 @@
 
 Explicit analysis of SMA outfit (blackbox) use in public equity markets for real-time insight into wealth distribution and direct stock market control. A call for transparency and public discourse.
 
+## Scope of This Repository
+
+This repository is a constrained implementation subset of the broader SMA-outfits project described later in this README.
+
+- Current code is Alpaca-only for ingestion and runtime paths.
+- Current code is intentionally limited to free-data constraints.
+- Current code adds rigorous statistical validation and acceptance gates that are not part of the broader source material preserved below.
+- Current code does not implement every data source, runtime path, storage system, or operational claim described in the broader original-project context.
+- For actual repository behavior, treat `Implementation Contract (Current Code)` and `Validation Workflows` as the authoritative specification.
+
 ## Implementation Contract (Current Code)
 
 - Runtime/data provider: Alpaca-only ingestion and execution paths.
@@ -40,6 +50,12 @@ Explicit analysis of SMA outfit (blackbox) use in public equity markets for real
   - `strict` is the baseline research/comparator lane.
   - Supported runtime profiles are `strict` and `context` only.
   - `CONFIG_PROFILE=replication` now hard-fails.
+
+## Broader Source / Original Project Context
+
+The remaining descriptive sections below preserve broader source material from the original project README. They provide context for the larger research narrative, but they are not a literal description of the current implementation in this repository.
+
+In particular, references below to Lightspeed, Webull, InfluxDB, alternative data flows, and broader operational claims should be read as original-project context unless they are explicitly restated in the current implementation contract above.
 
 ## Repository Structure
 This repository is organized to provide a comprehensive understanding of SMA (Simple Moving Average) outfits and their direct impact on market dynamics. Each directory contains specific resources tailored to different aspects of SMA analysis:
@@ -85,6 +101,8 @@ SMA outfits fundamentally dictate when and where the largest equity managers dir
 For those new to financial markets, it is an extreme leap to understand the magnitude of capital that is mobilized through public equity markets. These "outfits" are not optional elements, instead are core components that are what have prompted effective markets since the start of automated quotations in the NASDAQ. This repository should serve to set the stage for layman, academics, mathematicians, quantitative researches, and regulatory bodies to have full unabridged access to the global financial system catalyzed by financiers of the United States of America.
 
 ## Methodology
+
+This section reflects broader original-project context, not the literal implementation contract of this repository. The current codebase remains Alpaca-only and free-data-constrained as documented above.
 
 This research relies on high-precision data sourced primarily from desktop Lightspeed (brokerage) and Webull platforms, both of which are known for their near-total accuracy in data provision. However, periodic data inconsistencies have been observed with Webull, notably on March 18th, 2024, which involved data discrepancies potentially linked to cache errors. Lightspeed Broker has consistently delivered accurate data barring isolated incidents directly attributed to errors from the NYSE or NASDAQ. To manage and store the extensive volume of historical price action data required for this analysis, InfluxDB was employed due to its robust data handling capabilities. The InfluxDB system was chosen for its efficiency in storing time-series data, allowing for rapid queries and retrieval necessary for the rapid real-time nature of equity market analysis. This setup ensures that all data used is normalized and processed with the highest standards of accuracy, serving as the backbone for all subsequent analytical tasks.
 

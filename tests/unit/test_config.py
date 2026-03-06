@@ -72,6 +72,57 @@ def test_invalid_live_reconnect_bounds_rejected(tmp_path: Path) -> None:
         load_settings(config_path=config_path, env_path=env_path)
 
 
+def test_invalid_strategy_trigger_mode_rejected(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {"strategy": {"trigger_mode": "mixed_author_v1"}}
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="close_touch_or_cross"):
+        load_settings(config_path=config_path, env_path=env_path)
+
+
+def test_removed_signal_trigger_metadata_fields_rejected(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.local"
+    env_path.write_text(
+        "\n".join(
+            [
+                "ALPACA_API_KEY=test-key",
+                "ALPACA_SECRET_KEY=test-secret",
+                "ALPACA_BASE_URL=https://paper-api.alpaca.markets",
+                "ALPACA_DATA_URL=https://data.alpaca.markets",
+                "ALPACA_DATA_FEED=iex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {
+        "signal": {
+            "tolerance": 0.01,
+            "trigger_mode": "bar_touch",
+        }
+    }
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        load_settings(config_path=config_path, env_path=env_path)
+
+
 def test_app_timezone_env_does_not_override_sessions_timezone_default(tmp_path: Path) -> None:
     env_path = tmp_path / ".env.local"
     env_path.write_text(

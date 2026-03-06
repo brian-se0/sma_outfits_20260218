@@ -157,7 +157,7 @@ def test_close_touch_or_cross_trigger_long_and_short() -> None:
     assert short_cross_signals[0].side == "SHORT"
 
 
-def test_mixed_author_v1_uses_close_touch_or_cross_when_not_high_volatility() -> None:
+def test_detector_rejects_unsupported_trigger_mode() -> None:
     route = RouteRule(
         id="long_route",
         symbol="SPY",
@@ -173,113 +173,13 @@ def test_mixed_author_v1_uses_close_touch_or_cross_when_not_high_volatility() ->
         stop_offset=0.01,
     )
     outfits = [OutfitDefinition("route_outfit", (10,), "route", "10")]
-    detector = StrikeDetector(
-        outfits=outfits,
-        routes=[route],
-        strict_routing=True,
-        trigger_mode="mixed_author_v1",
-        mixed_trigger_volatility_lookback_bars=20,
-        mixed_trigger_volatility_percentile_threshold=75.0,
-    )
-
-    bar = _bar(symbol="SPY", close=100.009, minute=17)
-    states = {10: _state(bar, 10, 100.0)}
-
-    # Short history forces mixed mode to use baseline touch/cross behavior.
-    _, signals = detector.detect(
-        bar=bar,
-        sma_states=states,
-        history=_history(100.5, 100.009),
-    )
-    assert len(signals) == 1
-    assert signals[0].side == "LONG"
-
-
-def test_mixed_author_v1_high_volatility_requires_candle_close_cross_only() -> None:
-    route = RouteRule(
-        id="long_route",
-        symbol="SPY",
-        timeframe="1m",
-        outfit_id="route_outfit",
-        key_period=10,
-        side="LONG",
-        signal_type="precision_buy",
-        micro_periods=[10],
-        ignore_close_below_key_when_micro_positive=False,
-        macro_gate="none",
-        risk_mode="singular_penny_only",
-        stop_offset=0.01,
-    )
-    outfits = [OutfitDefinition("route_outfit", (10,), "route", "10")]
-    mixed_detector = StrikeDetector(
-        outfits=outfits,
-        routes=[route],
-        strict_routing=True,
-        trigger_mode="mixed_author_v1",
-        mixed_trigger_volatility_lookback_bars=4,
-        mixed_trigger_volatility_percentile_threshold=75.0,
-    )
-    baseline_detector = StrikeDetector(
-        outfits=outfits,
-        routes=[route],
-        strict_routing=True,
-        trigger_mode="close_touch_or_cross",
-    )
-
-    # Case A: high-volatility and close-confirmed, but no touch/cross -> no signal.
-    no_cross_bar = _bar(symbol="SPY", close=102.5, minute=18)
-    no_cross_states = {10: _state(no_cross_bar, 10, 100.0)}
-    no_cross_history = _history(100.0, 100.1, 100.2, 100.3, 101.0, 102.5)
-
-    _, no_cross_baseline = baseline_detector.detect(
-        bar=no_cross_bar,
-        sma_states=no_cross_states,
-        history=no_cross_history,
-    )
-    _, no_cross_mixed = mixed_detector.detect(
-        bar=no_cross_bar,
-        sma_states=no_cross_states,
-        history=no_cross_history,
-    )
-    assert no_cross_baseline == []
-    assert no_cross_mixed == []
-
-    # Case B: high-volatility with crossing candle close -> signal allowed.
-    cross_bar = _bar(symbol="SPY", close=100.006, minute=19)
-    cross_states = {10: _state(cross_bar, 10, 100.0)}
-    cross_history = _history(99.8, 99.85, 99.9, 99.95, 98.0, 100.006)
-
-    _, cross_baseline = baseline_detector.detect(
-        bar=cross_bar,
-        sma_states=cross_states,
-        history=cross_history,
-    )
-    _, cross_mixed = mixed_detector.detect(
-        bar=cross_bar,
-        sma_states=cross_states,
-        history=cross_history,
-    )
-    assert len(cross_baseline) == 1
-    assert len(cross_mixed) == 1
-    assert cross_mixed[0].side == "LONG"
-
-    # Case C: high-volatility touch-only (no cross) is blocked in mixed mode.
-    touch_only_bar = _bar(symbol="SPY", close=100.006, minute=20)
-    touch_only_states = {10: _state(touch_only_bar, 10, 100.0)}
-    touch_only_history = _history(99.8, 99.85, 99.9, 99.95, 102.0, 100.006)
-
-    _, touch_only_baseline = baseline_detector.detect(
-        bar=touch_only_bar,
-        sma_states=touch_only_states,
-        history=touch_only_history,
-    )
-    _, touch_only_mixed = mixed_detector.detect(
-        bar=touch_only_bar,
-        sma_states=touch_only_states,
-        history=touch_only_history,
-    )
-    assert len(touch_only_baseline) == 1
-    assert touch_only_mixed == []
+    with pytest.raises(RuntimeError, match="Unsupported strategy trigger_mode"):
+        StrikeDetector(
+            outfits=outfits,
+            routes=[route],
+            strict_routing=True,
+            trigger_mode="mixed_author_v1",
+        )
 
 
 def test_macro_gate_short_requires_bearish_regime() -> None:

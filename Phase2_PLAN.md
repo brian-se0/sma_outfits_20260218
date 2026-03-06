@@ -68,4 +68,4 @@ The current runtime contract is:
 ## Historical References
 
 - Historical Phase 1 closeout record: `End_of_Phase1_Report.md`
-- Historical three-profile planning artifacts: `audit/history/`
+- Historical supporting docs currently remain at repository root pending post-rerun archival reorganization.

@@ -5,7 +5,7 @@ This directory stores versioned citation metadata used by the Academic Validatio
 ## Files
 
 - `academic_validation.yaml`: citation pack consumed by report generation.
-- `author_alignment_rules.yaml`: ground-truth checklist used to score replication alignment.
+- `author_alignment_rules.yaml`: ground-truth checklist used to score author alignment.
 
 ## Citation Schema
 

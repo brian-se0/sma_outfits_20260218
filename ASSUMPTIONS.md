@@ -16,7 +16,7 @@
 1. Session filtering defaults to regular U.S. hours (`09:30-16:00 America/New_York`) for non-crypto symbols.
 2. Crypto symbols are detected by `/` (for example, `BTC/USD`) and bypass regular-session filtering.
 3. SMA input price is `strategy.price_basis` (`ohlc4` default, `close` optional).
-4. Active strike trigger is `strategy.trigger_mode=close_touch_or_cross`; `signal.trigger_mode` is metadata-only.
+4. Executable strike triggering is controlled by `strategy.trigger_mode=close_touch_or_cross`; `signal` config is limited to tolerance.
 5. Reporting uses canonical `both` attribution only: `attribution_mode="both"` with explicit `strike_attribution` and `close_attribution` payloads.
 6. Free Alpaca runs are bar-based approximations and cannot reproduce tick/second/millisecond source precision.
 

@@ -2,6 +2,8 @@
 
 This document is preserved as historical analysis from 2026-02-24, when `replication` was still treated as an active runtime lane. As of 2026-03-06, the current runtime contract supports only `strict` and `context`.
 
+Some artifact paths cited below may be absent in the current checkout because historical artifacts were intentionally cleared on March 6, 2026 before a fresh Phase 1 rerun.
+
 # Null Hypothesis Assessment
 
 Date of assessment: 2026-02-24 (UTC)  

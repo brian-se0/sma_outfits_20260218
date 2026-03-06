@@ -199,7 +199,7 @@ The historical `replication` closeout evidence remains preserved in archived art
 - `End_of_Phase1_Report.md` remains the canonical historical closeout record.
 - `Phase2_PLAN.md` is the current forward plan for Phase 2 hardening work.
 - `make_commands.md` documents the current two-profile `Makefile` surface.
-- Historical forward-plan and null-hypothesis documents have been moved under `audit/history/`.
+- Historical forward-plan and null-hypothesis documents currently remain at repository root; archival reorganization can be refreshed after the next Phase 1 rerun.
 
 ## Phase 2 Boundary (Current State)
 

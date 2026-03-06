@@ -1,5 +1,5 @@
 version: 1
-description: "Checklist used to compute deterministic replication score for academic validation readiness."
+description: "Checklist used to compute deterministic author-alignment score for academic validation readiness."
 rules:
   - id: wfo_min_folds
     description: "Walk-forward fold count meets configured minimum."

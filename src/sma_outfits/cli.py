@@ -405,7 +405,7 @@ def _build_paper_hardening_init_payload(
             "make run ACTION=run-live CONFIG_PROFILE=context",
             (
                 "make run ACTION=verify-readiness CONFIG_PROFILE=context "
-                "START=2024-12-31T05:00:00Z END=2026-02-28T00:00:00Z "
+                "START=<full_range_start> END=<readiness_end> "
                 "UNIVERSE=all TIMEFRAME_SET=all"
             ),
         ],

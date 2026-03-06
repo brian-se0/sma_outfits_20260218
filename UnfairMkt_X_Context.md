@@ -1,3 +1,10 @@
+# Historical Source Context
+
+This document preserves broader original-project and X/Twitter context. It is not the implementation contract for the current repository.
+
+- Current repository contract: Python `3.14.3`, Alpaca-only runtime/data paths, free-data constraints, and Makefile-driven workflows.
+- References below to Lightspeed, Webull, InfluxDB, Polygon/yfinance, fallback providers, or broader runtime assumptions are preserved source context only.
+
 Comprehensive, Self-Contained Context Dump for Recreating the SMA-Outfits Codebase
 1. Project Goal & Philosophy (extracted verbatim from README + X bio/posts)
 Core Thesis: The U.S. public equity markets (NYSE/NASDAQ) are 100% controlled in real time by “SMA outfits” — predetermined sets of Simple Moving Averages (multiple periods plotted simultaneously on one chart) used by aggressive trading divisions at JPM, Citadel, BlackRock, BofA, etc. These outfits act as precision triggers for massive dark-pool / HFT buys or shorts. Price touching or crossing a key outfit level = instant algorithmic activation → market moves in the direction of the large players → wealth transfer from retail/public to institutions + long-term participants.

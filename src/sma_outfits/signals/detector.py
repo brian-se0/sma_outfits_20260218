@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from statistics import median
-from typing import Callable
+from typing import Callable, Literal
 
 import pandas as pd
 import yaml
@@ -119,16 +119,12 @@ class StrikeDetector:
         routes: list[RouteRule],
         strict_routing: bool = True,
         tolerance: float = 0.01,
-        trigger_mode: str = "close_touch_or_cross",
-        mixed_trigger_volatility_lookback_bars: int = 20,
-        mixed_trigger_volatility_percentile_threshold: float = 75.0,
+        trigger_mode: Literal["close_touch_or_cross"] = "close_touch_or_cross",
     ) -> None:
+        if trigger_mode != "close_touch_or_cross":
+            raise RuntimeError(f"Unsupported strategy trigger_mode '{trigger_mode}'")
         self.tolerance = tolerance
         self.trigger_mode = trigger_mode
-        self.mixed_trigger_volatility_lookback_bars = mixed_trigger_volatility_lookback_bars
-        self.mixed_trigger_volatility_percentile_threshold = (
-            mixed_trigger_volatility_percentile_threshold
-        )
         self.strict_routing = strict_routing
         self._outfits_by_id: dict[str, OutfitDefinition] = {
             outfit.outfit_id: outfit for outfit in outfits
@@ -332,20 +328,7 @@ class StrikeDetector:
         context: RouteBarContext,
         history: pd.DataFrame,
     ) -> bool:
-        if self.trigger_mode == "close_touch_or_cross":
-            return self._trigger_close_touch_or_cross(bar=bar, context=context, history=history)
-        if self.trigger_mode == "mixed_author_v1":
-            # Mixed mode:
-            # - low-volatility: preserve baseline touch-or-cross behavior
-            # - high-volatility: require candle-close cross confirmation only
-            if self._is_high_volatility_regime(history=history):
-                return self._is_candle_close_cross_confirmed(
-                    bar=bar,
-                    context=context,
-                    history=history,
-                )
-            return self._trigger_close_touch_or_cross(bar=bar, context=context, history=history)
-        raise RuntimeError(f"Unsupported strategy trigger_mode '{self.trigger_mode}'")
+        return self._trigger_close_touch_or_cross(bar=bar, context=context, history=history)
 
     def _trigger_close_touch_or_cross(
         self,
@@ -371,47 +354,6 @@ class StrikeDetector:
             else:
                 cross = prev_close > key_sma and bar.close <= key_sma
         return touch or cross
-
-    def _is_candle_close_cross_confirmed(
-        self,
-        *,
-        bar: BarEvent,
-        context: RouteBarContext,
-        history: pd.DataFrame,
-    ) -> bool:
-        if len(history) < 2 or "close" not in history.columns:
-            return False
-        prev_close = float(history.iloc[-2]["close"])
-        if context.route.side == "LONG":
-            return prev_close < context.key_sma and bar.close >= context.key_sma
-        return prev_close > context.key_sma and bar.close <= context.key_sma
-
-    def _is_high_volatility_regime(self, *, history: pd.DataFrame) -> bool:
-        if "close" not in history.columns:
-            return False
-        if len(history) < self.mixed_trigger_volatility_lookback_bars + 2:
-            return False
-
-        close_series = pd.to_numeric(history["close"], errors="coerce").dropna()
-        if len(close_series) < self.mixed_trigger_volatility_lookback_bars + 2:
-            return False
-
-        abs_returns = close_series.pct_change().abs().dropna()
-        if len(abs_returns) < self.mixed_trigger_volatility_lookback_bars + 1:
-            return False
-
-        baseline = abs_returns.iloc[-(self.mixed_trigger_volatility_lookback_bars + 1) : -1]
-        if len(baseline) != self.mixed_trigger_volatility_lookback_bars:
-            return False
-
-        threshold = float(
-            baseline.quantile(self.mixed_trigger_volatility_percentile_threshold / 100.0)
-        )
-        if not pd.notna(threshold):
-            return False
-
-        current_return = float(abs_returns.iloc[-1])
-        return current_return >= threshold
 
     def _passes_confluence(
         self,

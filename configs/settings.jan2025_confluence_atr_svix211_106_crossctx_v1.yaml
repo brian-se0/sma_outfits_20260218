@@ -195,8 +195,6 @@ timeframes:
 
 signal:
   tolerance: 0.01
-  trigger_mode: bar_touch
-  volatility_percentile_threshold: 75.0
 
 strategy:
   price_basis: ohlc4
@@ -650,7 +648,7 @@ validation:
     oos_calmar_min: 2.0
     bootstrap_pvalue_max: 0.06
     fdr_qvalue_max: 0.05
-    replication_score_min: 0.7
+    author_alignment_score_min: 0.7
   bootstrap:
     method: stationary_block
     samples: 10000

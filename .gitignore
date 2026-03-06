@@ -50,6 +50,10 @@ artifacts/
 *.png
 *.pdf
 
+# Local coverage diagnostics
+ignored_coverage_details.csv
+ignored_coverage_quality.json
+
 # IDE / OS files
 .vscode/
 .idea/

@@ -154,7 +154,7 @@ def build_academic_validation_payload(
         "execution_realism_non_negative": execution_gate_pass,
         "citation_pack_present": True,
     }
-    replication = _replication_summary(rules=alignment_rules, evidence=evidence)
+    author_alignment = _author_alignment_summary(rules=alignment_rules, evidence=evidence)
 
     blocking_reasons: list[str] = []
     if fold_count < validation.wfo.min_folds:
@@ -189,11 +189,11 @@ def build_academic_validation_payload(
         blocking_reasons.append("fdr_qvalue_gate_failed")
     if not regime_gate_pass:
         blocking_reasons.append("regime_stability_gate_failed")
-    if float(replication["score"]) < validation.thresholds.replication_score_min:
+    if float(author_alignment["score"]) < validation.thresholds.author_alignment_score_min:
         blocking_reasons.append(
-            "replication_score_below_threshold:"
-            f"{float(replication['score']):.6f}"
-            f"<{validation.thresholds.replication_score_min:.6f}"
+            "author_alignment_score_below_threshold:"
+            f"{float(author_alignment['score']):.6f}"
+            f"<{validation.thresholds.author_alignment_score_min:.6f}"
         )
 
     ready = len(blocking_reasons) == 0
@@ -220,7 +220,7 @@ def build_academic_validation_payload(
         "pvalues": pvalues,
         "regime_stability": regime_stability,
         "random_strategy_mc": random_strategy_mc,
-        "replication": replication,
+        "author_alignment": author_alignment,
         "citation_pack": citations_payload,
     }
 
@@ -709,7 +709,7 @@ def _random_strategy_mc_summary(
     }
 
 
-def _replication_summary(
+def _author_alignment_summary(
     *,
     rules: list[_AlignmentRule],
     evidence: dict[str, bool],
