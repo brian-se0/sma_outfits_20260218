@@ -16,8 +16,8 @@ The current runtime contract is:
 
 ## Current Ground Truth
 
-1. `make phase1-close` remains available as a reproducibility harness, now in a 2-profile recheck form.
-2. `make phase2-preflight CONFIG_PROFILE=context` is the current entrypoint for Part 2 preflight work.
+1. `make run ACTION=phase1-close` remains available as a reproducibility harness, now in a 2-profile recheck form.
+2. `make run ACTION=phase2-preflight CONFIG_PROFILE=context` is the current entrypoint for Part 2 preflight work.
 3. `paper-hardening-init` still reports three blocking implementation gaps:
    - `missing_broker_order_submission`
    - `missing_fill_callback_processing`
@@ -60,7 +60,7 @@ The current runtime contract is:
 
 ## Acceptance Criteria
 
-1. `make phase2-preflight CONFIG_PROFILE=context` passes.
+1. `make run ACTION=phase2-preflight CONFIG_PROFILE=context` passes.
 2. Updated tests cover the new live hardening behavior.
 3. Live-paper workflows remain deterministic where deterministic behavior is expected.
 4. Current docs, Make targets, and examples continue to describe only `strict` and `context`.

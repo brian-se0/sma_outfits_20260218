@@ -373,7 +373,7 @@ def test_write_run_manifest_writes_expected_payload(
         report_range="2025-01-01T00:00:00Z,2025-12-31T23:59:59Z",
         symbols="SPY,QQQ",
         timeframes="1m,1D",
-        command="make e2e",
+        command="make run ACTION=e2e",
         run_id="unit_test_run",
         output=output_path,
     )

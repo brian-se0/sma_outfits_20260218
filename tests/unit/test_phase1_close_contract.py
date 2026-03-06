@@ -8,10 +8,13 @@ def test_phase1_close_script_enumerates_only_strict_and_context() -> None:
 
     assert '$profiles = @("strict", "context")' in script
     assert '$passes = @("iso1", "iso2")' in script
+    assert '"run"' in script
+    assert '"ACTION=e2e"' in script
     assert '"CONFIG_PROFILE=$profileName"' in script
-    assert '"verify-readiness"' in script
+    assert '"ACTION=verify-readiness"' in script
     assert (
         '"artifacts/readiness/readiness_acceptance_${profileName}_${OutputLabel}_${pass}.json"'
         in script
     )
+    assert 'command               = "make run ACTION=phase1-close"' in script
     assert '"replication"' not in script

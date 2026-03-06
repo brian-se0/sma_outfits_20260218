@@ -1,104 +1,111 @@
 # Make Commands
 
-This file documents the current `Makefile` interface. The supported runtime profile contract is `strict` and `context` only.
+This file documents the current grouped `Makefile` interface.
 
-`context` is the default operational source-aligned lane. `strict` is the baseline research/comparator lane. `CONFIG_PROFILE=replication` is no longer supported and hard-fails.
+The supported runtime profile contract is `strict` and `context` only. `context` is the default operational source-aligned lane. `strict` is the baseline research/comparator lane. `CONFIG_PROFILE=replication` is not supported and hard-fails.
 
-## Targets
+## Public Targets Overview
 
-| Target | Purpose | Common flags |
+| Public target | Purpose | Default |
 |---|---|---|
-| `make help` | Print targets, variables, and examples derived from the `Makefile`. | None |
-| `make venv` | Create or repair `.venv` and enforce Python `3.14.3`. | None |
-| `make install` | Install the package and dev dependencies into `.venv`. | None |
-| `make validate-config` | Validate the active config file. | `CONFIG_PROFILE`, config path overrides |
-| `make discover-range` | Discover earliest available bars and write a manifest. | `CONFIG_PROFILE`, selection flags, `DISCOVER_START`, `READINESS_END`, `DISCOVER_RANGE_OUTPUT` |
-| `make verify-readiness` | Run readiness acceptance checks and write a JSON summary. | `CONFIG_PROFILE`, selection flags, `START`, `END`, `READINESS_ACCEPTANCE_OUTPUT`, `VERIFY_READINESS_ARGS` |
-| `make paper-hardening-init` | Generate the Part 2 hardening scaffold manifest. | `CONFIG_PROFILE`, `PAPER_HARDENING_INIT_OUTPUT` |
-| `make phase2-preflight` | Run `paper-hardening-init` and `test-part2-components` in sequence. | `CONFIG_PROFILE`, `PAPER_HARDENING_INIT_OUTPUT`, `PART2_TEST_PATHS` |
-| `make test-part2-components` | Run the Part 2 component gate tests. | `PART2_TEST_PATHS` |
-| `make test` | Run the full test suite. | None |
-| `make dead-code-check` | Run the dead-code gate via `vulture`. | None |
-| `make backfill` | Backfill selected symbols and timeframes over `START..END`. | `CONFIG_PROFILE`, selection flags, `START`, `END` |
-| `make replay` | Replay selected symbols and timeframes over `START..END`. | `CONFIG_PROFILE`, selection flags, `START`, `END` |
-| `make run-live` | Run the live execution path. | `CONFIG_PROFILE`, `RUN_LIVE_ARGS` |
-| `make report` | Build report artifacts. | `CONFIG_PROFILE`, `REPORT_RANGE` |
-| `make migrate-storage-layout` | Migrate storage layout in non-dry-run mode. | `CONFIG_PROFILE` |
-| `make preflight-storage` | Check free disk space before heavy profiles. | `PROFILE`, `MIN_FREE_GB` |
-| `make e2e` | Orchestrate `validate-config`, `backfill`, `replay`, and `report`, then write a run manifest. | `CONFIG_PROFILE`, range flags, selection flags, stage flags, warmup/report flags |
-| `make phase1-close` | Run the 2-profile x 2-pass deterministic Phase 1 recheck protocol and archive manifests. | `PHASE1_CLOSE_*`, `VERIFY_READINESS_ARGS` |
-| `make clean` | Remove artifacts, caches, and build outputs while keeping `.venv`. | None |
-| `make clean-all` | Run `clean` and also remove `.venv`. | None |
+| `make help` | Print the streamlined interface, dispatcher flags, and examples. | n/a |
+| `make setup` | Create or repair `.venv`, enforce Python `3.14.3`, and optionally install dependencies. | `MODE=install` |
+| `make run` | Execute the primary workflow selected by `ACTION`. | `ACTION=e2e` |
+| `make qa` | Run the QA suite selected by `SUITE`. | `SUITE=full` |
+| `make clean` | Remove artifacts, caches, and build outputs. | `SCOPE=default` |
 
-## Core Flags
+## Dispatcher Flags
+
+- `MODE`: Allowed values are `install`, `venv`. `install` creates or repairs `.venv`, enforces Python `3.14.3`, and installs dependencies. `venv` stops after the environment/bootstrap step.
+- `ACTION`: Allowed values are `e2e`, `validate-config`, `discover-range`, `verify-readiness`, `backfill`, `replay`, `report`, `run-live`, `migrate-storage-layout`, `paper-hardening-init`, `phase2-preflight`, `preflight-storage`, `phase1-close`.
+- `SUITE`: Allowed values are `full`, `part2`, `dead-code`, `all`.
+- `SCOPE`: Allowed values are `default`, `all`.
+
+## Run Action Matrix
+
+| Action | Behavior |
+|---|---|
+| `e2e` | Run storage preflight, staged pipeline steps, and write the run manifest. |
+| `validate-config` | Validate the active config file. |
+| `discover-range` | Discover earliest available stock-bar coverage and write the manifest. |
+| `verify-readiness` | Run readiness acceptance checks and write the JSON summary. |
+| `backfill` | Backfill selected symbols and timeframes over `START..END`. |
+| `replay` | Replay selected symbols and timeframes over `START..END`. |
+| `report` | Build report artifacts, optionally using `REPORT_RANGE`. |
+| `run-live` | Run the live execution path. |
+| `migrate-storage-layout` | Apply the non-dry-run storage layout migration. |
+| `paper-hardening-init` | Generate the Part 2 hardening scaffold manifest. |
+| `phase2-preflight` | Run `paper-hardening-init` and then `qa SUITE=part2`. |
+| `preflight-storage` | Check free disk space for heavier profiles without installing dependencies. |
+| `phase1-close` | Run the deterministic two-profile, two-pass closure harness. |
+
+## Shared Domain Flags
 
 - `CONFIG_PROFILE`: Allowed values are `strict`, `context`. Default: `context`.
-- `STRICT_CONFIG_PATH`: Default strict config path.
-- `CONTEXT_CONFIG_PATH`: Default context config path.
-- `ACTIVE_CONFIG`: Derived from `CONFIG_PROFILE`. Invalid profiles hard-fail.
-- `PROFILE`: Range preset. Allowed values: `smoke`, `day`, `week`, `month`, `max`, `max_common`, `custom`.
-- `UNIVERSE`: Symbol preset. Allowed values: `core`, `core_expanded`, `all_stocks`, `all`.
-- `TIMEFRAME_SET`: Timeframe preset. Allowed values: `core`, `all`.
-- `SYMBOLS`: CSV symbol override.
-- `TIMEFRAMES`: CSV timeframe override.
+- `STRICT_CONFIG_PATH`, `CONTEXT_CONFIG_PATH`: Canonical config paths selected by `CONFIG_PROFILE`.
+- `PROFILE`: Allowed values are `smoke`, `day`, `week`, `month`, `max`, `max_common`, `custom`.
+- `UNIVERSE`: Allowed values are `core`, `core_expanded`, `all_stocks`, `all`.
+- `TIMEFRAME_SET`: Allowed values are `core`, `all`.
+- `SYMBOLS`, `TIMEFRAMES`: CSV selection overrides.
 - `BACKFILL_SYMBOLS`, `BACKFILL_TIMEFRAMES`: Stage-specific backfill overrides.
 - `REPLAY_SYMBOLS`, `REPLAY_TIMEFRAMES`: Stage-specific replay overrides.
-- `STAGES`: CSV subset of `validate-config,backfill,replay,report` used by `make e2e`.
-
-## Range and Readiness Flags
-
+- `STAGES`: CSV subset of `validate-config,backfill,replay,report` used by `ACTION=e2e`.
 - `START`, `END`: Explicit UTC timestamps. Required when `PROFILE=custom`.
-- `ALPACA_BASIC_HISTORICAL_START`: Default free-tier historical anchor.
-- `ALPACA_BASIC_HISTORICAL_DELAY_MINUTES`: Default historical lag offset.
-- `MAX_START`, `MAX_END`: Derived bounds for `PROFILE=max`.
-- `DISCOVER_START`: Lower bound probe start for `discover-range`.
-- `READINESS_END`: Upper bound for readiness/discovery workflows.
-- `DISCOVER_RANGE_OUTPUT`: Output path for `discover-range`.
-- `READINESS_ACCEPTANCE_OUTPUT`: Output path for `verify-readiness`.
-- `FULL_RANGE_START`: Auto-loaded from `DISCOVER_RANGE_OUTPUT.full_range_start` when present.
-- `COMMON_ANALYSIS_START`: Auto-computed analysis start for `PROFILE=max_common`.
-- `WARMUP_DAYS`: Warmup length used by `make e2e`.
-- `ANALYSIS_START`, `ANALYSIS_END`: Analysis/report window used by `make e2e`.
-- `WARMUP_START`: Computed warmup boundary.
-- `BACKFILL_START`, `BACKFILL_END`: Backfill window used by `make e2e`.
-- `REPLAY_START`, `REPLAY_END`: Replay window used by `make e2e`.
-- `REPORT_RANGE`: Report window. For `make e2e`, defaults to `ANALYSIS_START,ANALYSIS_END`.
-- `VERIFY_READINESS_ARGS`: Extra flags appended to `verify-readiness`.
-
-## Phase 2 Flags
-
-- `PAPER_HARDENING_INIT_OUTPUT`: Output path for `paper-hardening-init`.
-- `PART2_TEST_PATHS`: Pytest paths used by `test-part2-components`.
-- `RUN_LIVE_ARGS`: Extra flags forwarded to `run-live`.
-
-## Phase 1 Closure Flags
-
-- `PHASE1_CLOSE_PROFILE`: `e2e` profile used during closure. Default: `custom`.
-- `PHASE1_CLOSE_START`, `PHASE1_CLOSE_END`: Fixed closure timestamps.
-- `PHASE1_CLOSE_SYMBOLS`, `PHASE1_CLOSE_TIMEFRAMES`: Fixed closure selection scope.
-- `PHASE1_CLOSE_STAGES`: `e2e` stage list used during closure.
-- `PHASE1_CLOSE_OUTPUT`: Summary JSON path. Default: `artifacts/readiness/phase1_recheck_acceptance.json`.
-- `PHASE1_CLOSE_LABEL`: Label suffix used in per-pass manifest names. Default: `phase1recheck`.
-- `PHASE1_CLOSE_ARCHIVE_ROOT`: Root directory used for archived per-pass manifests. Default: `audit/phase1_rechecks`.
-
-## Storage Safety
-
-- `MIN_FREE_GB`: Free disk threshold enforced by `preflight-storage` and `make e2e` for heavier profiles.
-
-## Precedence Notes
-
-- Command-line variable overrides take precedence over profile-derived defaults.
-- `SYMBOLS` and `TIMEFRAMES` override `UNIVERSE` and `TIMEFRAME_SET`.
-- Stage-specific symbol/timeframe flags override the base `SYMBOLS` and `TIMEFRAMES`.
-- `make phase2-preflight` reuses whatever `CONFIG_PROFILE` and output/test overrides you pass to the top-level command.
+- `WARMUP_DAYS`, `ANALYSIS_START`, `ANALYSIS_END`, `WARMUP_START`, `BACKFILL_START`, `BACKFILL_END`, `REPLAY_START`, `REPLAY_END`, `REPORT_RANGE`: e2e window controls.
+- `DISCOVER_START`, `READINESS_END`, `DISCOVER_RANGE_OUTPUT`, `READINESS_ACCEPTANCE_OUTPUT`, `VERIFY_READINESS_ARGS`: discovery and readiness controls.
+- `PAPER_HARDENING_INIT_OUTPUT`, `PART2_TEST_PATHS`, `RUN_LIVE_ARGS`: Part 2 and live-run controls.
+- `PHASE1_CLOSE_PROFILE`, `PHASE1_CLOSE_START`, `PHASE1_CLOSE_END`, `PHASE1_CLOSE_SYMBOLS`, `PHASE1_CLOSE_TIMEFRAMES`, `PHASE1_CLOSE_STAGES`, `PHASE1_CLOSE_OUTPUT`, `PHASE1_CLOSE_LABEL`, `PHASE1_CLOSE_ARCHIVE_ROOT`: Phase 1 closure controls.
+- `MIN_FREE_GB`: Free disk threshold enforced by `ACTION=preflight-storage` and the `e2e` workflow.
 
 ## Common Examples
 
 ```powershell
-make e2e
-make e2e CONFIG_PROFILE=strict PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all
-make verify-readiness CONFIG_PROFILE=context START=$env:FULL_RANGE_START END=$env:READINESS_END UNIVERSE=all_stocks TIMEFRAME_SET=all
-make phase1-close
-make phase2-preflight CONFIG_PROFILE=context
-make run-live CONFIG_PROFILE=context RUN_LIVE_ARGS='--runtime-minutes 30 --lookback-hours 8'
+make help
+make setup MODE=venv
+make setup
+make run
+make run ACTION=e2e CONFIG_PROFILE=strict PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all
+make run ACTION=verify-readiness CONFIG_PROFILE=context START=$env:FULL_RANGE_START END=$env:READINESS_END UNIVERSE=all_stocks TIMEFRAME_SET=all
+make run ACTION=phase1-close
+make run ACTION=phase2-preflight CONFIG_PROFILE=context
+make run ACTION=run-live CONFIG_PROFILE=context RUN_LIVE_ARGS='--runtime-minutes 30 --lookback-hours 8'
+make qa
+make qa SUITE=part2
+make qa SUITE=dead-code
+make clean SCOPE=all
 ```
+
+## Legacy-to-New Command Mapping
+
+| Legacy command | Current command |
+|---|---|
+| `make venv` | `make setup MODE=venv` |
+| `make install` | `make setup` |
+| `make validate-config` | `make run ACTION=validate-config` |
+| `make discover-range` | `make run ACTION=discover-range` |
+| `make verify-readiness` | `make run ACTION=verify-readiness` |
+| `make paper-hardening-init` | `make run ACTION=paper-hardening-init` |
+| `make phase2-preflight` | `make run ACTION=phase2-preflight` |
+| `make test-part2-components` | `make qa SUITE=part2` |
+| `make test` | `make qa` |
+| `make dead-code-check` | `make qa SUITE=dead-code` |
+| `make backfill` | `make run ACTION=backfill` |
+| `make replay` | `make run ACTION=replay` |
+| `make run-live` | `make run ACTION=run-live` |
+| `make report` | `make run ACTION=report` |
+| `make migrate-storage-layout` | `make run ACTION=migrate-storage-layout` |
+| `make preflight-storage` | `make run ACTION=preflight-storage` |
+| `make e2e` | `make run ACTION=e2e` |
+| `make phase1-close` | `make run ACTION=phase1-close` |
+| `make clean-all` | `make clean SCOPE=all` |
+
+## Notes on Defaults and Hard-Fail Validation
+
+- `make run` defaults to `ACTION=e2e`.
+- `make setup` defaults to `MODE=install`.
+- `make qa` defaults to `SUITE=full`.
+- `make clean` defaults to `SCOPE=default`.
+- Invalid `MODE`, `ACTION`, `SUITE`, and `SCOPE` values fail immediately with explicit allowed-value messages.
+- All `run` actions except `preflight-storage` go through `make setup MODE=install` before dispatch.
+- `qa SUITE=all` runs `full` and then `dead-code`; it does not include `part2`.
+- `clean SCOPE=default` preserves `.venv`; `clean SCOPE=all` also removes `.venv`.

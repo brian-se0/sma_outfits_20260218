@@ -65,7 +65,8 @@ foreach ($pass in $passes) {
         }
 
         $e2eArgs = @(
-            "e2e",
+            "run",
+            "ACTION=e2e",
             "CONFIG_PROFILE=$profileName",
             "PROFILE=$Profile",
             "START=$Start",
@@ -76,12 +77,13 @@ foreach ($pass in $passes) {
         )
         & $MakeCommand @e2eArgs
         if ($LASTEXITCODE -ne 0) {
-            throw ("phase1-close failed: make e2e profile=" + $profileName + " pass=" + $pass)
+            throw ("phase1-close failed: make run ACTION=e2e profile=" + $profileName + " pass=" + $pass)
         }
 
         $manifestPath = "artifacts/readiness/readiness_acceptance_${profileName}_${OutputLabel}_${pass}.json"
         $verifyArgs = @(
-            "verify-readiness",
+            "run",
+            "ACTION=verify-readiness",
             "CONFIG_PROFILE=$profileName",
             "PROFILE=$Profile",
             "START=$Start",
@@ -95,7 +97,7 @@ foreach ($pass in $passes) {
         }
         & $MakeCommand @verifyArgs
         if ($LASTEXITCODE -ne 0) {
-            throw ("phase1-close failed: make verify-readiness profile=" + $profileName + " pass=" + $pass)
+            throw ("phase1-close failed: make run ACTION=verify-readiness profile=" + $profileName + " pass=" + $pass)
         }
 
         $payload = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
@@ -209,7 +211,7 @@ $status = if ($failures.Count -eq 0) { "ok" } else { "failed" }
 $summary = [ordered]@{
     status                = $status
     checked_at            = (Get-Date).ToUniversalTime().ToString("o")
-    command               = "make phase1-close"
+    command               = "make run ACTION=phase1-close"
     profile               = $Profile
     start                 = $Start
     end                   = $End

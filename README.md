@@ -19,16 +19,22 @@ Explicit analysis of SMA outfit (blackbox) use in public equity markets for real
 
 ## Validation Workflows
 
+- Environment/bootstrap:
+  - `make setup`
 - Operational default workflow:
-  - `make e2e` (defaults to `CONFIG_PROFILE=context`)
+  - `make run` (defaults to `ACTION=e2e` and `CONFIG_PROFILE=context`)
 - Phase 1 deterministic closeout:
-  - `make phase1-close`
+  - `make run ACTION=phase1-close`
 - Strict baseline workflow:
-  - `make e2e CONFIG_PROFILE=strict PROFILE=month`
+  - `make run ACTION=e2e CONFIG_PROFILE=strict PROFILE=month`
 - Context alignment workflow (operational):
-  - `make e2e CONFIG_PROFILE=context PROFILE=month`
+  - `make run ACTION=e2e CONFIG_PROFILE=context PROFILE=month`
 - Phase 2 preflight:
-  - `make phase2-preflight CONFIG_PROFILE=context`
+  - `make run ACTION=phase2-preflight CONFIG_PROFILE=context`
+- Main QA suite:
+  - `make qa`
+- Full cleanup including `.venv`:
+  - `make clean SCOPE=all`
 - Interpretation:
   - `context` is the default operational source-alignment lane.
   - `strict` is the baseline research/comparator lane.

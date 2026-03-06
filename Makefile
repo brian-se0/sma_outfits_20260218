@@ -17,16 +17,20 @@ endif
 
 # e2e flag-driven defaults
 # Usage examples:
-#   make e2e
-#   make e2e PROFILE=week SYMBOLS=SPY
-#   make e2e PROFILE=max UNIVERSE=all TIMEFRAME_SET=all
-#   make discover-range CONFIG_PROFILE=strict UNIVERSE=all TIMEFRAME_SET=all
-#   make e2e PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all
-#   make e2e PROFILE=max UNIVERSE=all_stocks TIMEFRAME_SET=all
-#   make e2e PROFILE=month UNIVERSE=core_expanded TIMEFRAME_SET=core
-#   make e2e PROFILE=custom START=2025-01-02T14:30:00Z END=2025-01-31T21:00:00Z
-#   make e2e PROFILE=month WARMUP_DAYS=150
-#   make e2e PROFILE=month STAGES=backfill,replay,report
+#   make run
+#   make run ACTION=e2e PROFILE=week SYMBOLS=SPY
+#   make run ACTION=e2e PROFILE=max UNIVERSE=all TIMEFRAME_SET=all
+#   make run ACTION=discover-range CONFIG_PROFILE=strict UNIVERSE=all TIMEFRAME_SET=all
+#   make run ACTION=e2e PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all
+#   make run ACTION=e2e PROFILE=max UNIVERSE=all_stocks TIMEFRAME_SET=all
+#   make run ACTION=e2e PROFILE=month UNIVERSE=core_expanded TIMEFRAME_SET=core
+#   make run ACTION=e2e PROFILE=custom START=2025-01-02T14:30:00Z END=2025-01-31T21:00:00Z
+#   make run ACTION=e2e PROFILE=month WARMUP_DAYS=150
+#   make run ACTION=e2e PROFILE=month STAGES=backfill,replay,report
+MODE ?= install## help: Setup mode selector (install|venv).
+ACTION ?= e2e## help: Run action selector (e2e|validate-config|discover-range|verify-readiness|backfill|replay|report|run-live|migrate-storage-layout|paper-hardening-init|phase2-preflight|preflight-storage|phase1-close).
+SUITE ?= full## help: QA suite selector (full|part2|dead-code|all).
+SCOPE ?= default## help: Clean scope selector (default|all).
 PROFILE ?= smoke## help: Range profile (smoke|day|week|month|max|max_common|custom).
 UNIVERSE ?= core## help: Symbol universe preset (core|core_expanded|all_stocks|all).
 TIMEFRAME_SET ?= core## help: Timeframe preset (core|all).
@@ -105,7 +109,7 @@ PROFILE_START := $(MAX_START)
 PROFILE_END := $(MAX_END)
 else ifeq ($(PROFILE),max_common)
 ifeq ($(strip $(FULL_RANGE_START)),)
-$(error PROFILE='max_common' requires DISCOVER_RANGE_OUTPUT with full_range_start. Run: make discover-range CONFIG_PROFILE=$(CONFIG_PROFILE) UNIVERSE=all TIMEFRAME_SET=all)
+$(error PROFILE='max_common' requires DISCOVER_RANGE_OUTPUT with full_range_start. Run: make run ACTION=discover-range CONFIG_PROFILE=$(CONFIG_PROFILE) UNIVERSE=all TIMEFRAME_SET=all)
 endif
 ifeq ($(strip $(COMMON_ANALYSIS_START)),)
 $(error PROFILE='max_common' could not compute analysis start from FULL_RANGE_START='$(FULL_RANGE_START)' and WARMUP_DAYS='$(WARMUP_DAYS)')
@@ -209,79 +213,111 @@ $(eval PIPE_BACKFILL_END := $(BACKFILL_END))
 $(eval PIPE_REPLAY_START := $(REPLAY_START))
 $(eval PIPE_REPLAY_END := $(REPLAY_END))
 $(eval PIPE_REPORT_RANGE := $(REPORT_RANGE_FOR_E2E))
-$(eval PIPE_COMMAND := make e2e CONFIG_PROFILE=$(CONFIG_PROFILE))
+$(eval PIPE_COMMAND := make run ACTION=e2e CONFIG_PROFILE=$(CONFIG_PROFILE))
 endef
 
-.PHONY: help venv install validate-config discover-range verify-readiness paper-hardening-init phase2-preflight test-part2-components test dead-code-check backfill replay run-live report migrate-storage-layout preflight-storage e2e phase1-close clean clean-all
+.PHONY: help setup run qa clean
 
-help: ## Print available targets, common variables, and examples.
-	powershell -NoProfile -Command "$$lines = Get-Content -Path 'Makefile'; $$targets = @(); $$vars = @(); foreach ($$line in $$lines) { if ($$line -match '^(?<target>[A-Za-z0-9_.-]+):(?:[^#]|#(?!#))*## (?<desc>.+)$$') { if ($$matches.target -notlike '_*') { $$targets += [PSCustomObject]@{ key = $$matches.target; desc = $$matches.desc } } }; if ($$line -match '^(?<var>[A-Z][A-Z0-9_]*)\s*(?:\?|:|\+)?=\s*.*##\s*help:\s*(?<desc>.+)$$') { $$vars += [PSCustomObject]@{ key = $$matches.var; desc = $$matches.desc } } }; Write-Output 'Targets:'; foreach ($$entry in $$targets) { Write-Output ('  make ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Common variables:'; foreach ($$entry in $$vars) { Write-Output ('  ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Examples:'; $$examples = @('make e2e','make e2e CONFIG_PROFILE=strict PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all','make verify-readiness CONFIG_PROFILE=context START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all','make phase1-close','make phase2-preflight CONFIG_PROFILE=context','make run-live CONFIG_PROFILE=context RUN_LIVE_ARGS=''--runtime-minutes 30 --lookback-hours 8''','make migrate-storage-layout CONFIG_PROFILE=strict'); foreach ($$e in $$examples) { Write-Output ('  ' + $$e) }"
+VALID_MODES := install venv
+VALID_ACTIONS := e2e validate-config discover-range verify-readiness backfill replay report run-live migrate-storage-layout paper-hardening-init phase2-preflight preflight-storage phase1-close
+VALID_SUITES := full part2 dead-code all
+VALID_SCOPES := default all
+format_allowed = $(subst $(space),$(comma) ,$(strip $(1)))
+require_choice = $(if $(filter $(1),$(2)),,$(error Unsupported $(3)='$(1)'. Use: $(call format_allowed,$(2))))
 
-venv: ## Create/repair .venv and enforce Python 3.14.3.
+help: ## Print the streamlined target interface, dispatcher flags, and examples.
+	powershell -NoProfile -Command "$$lines = Get-Content -Path 'Makefile'; $$targets = @(); $$vars = @(); foreach ($$line in $$lines) { if ($$line -match '^(?<target>[A-Za-z0-9_.-]+):(?:[^#]|#(?!#))*## (?<desc>.+)$$') { if ($$matches.target -notlike '_*') { $$targets += [PSCustomObject]@{ key = $$matches.target; desc = $$matches.desc } } }; if ($$line -match '^(?<var>[A-Z][A-Z0-9_]*)\s*(?:\?|:|\+)?=\s*.*##\s*help:\s*(?<desc>.+)$$') { $$vars += [PSCustomObject]@{ key = $$matches.var; desc = $$matches.desc } } }; Write-Output 'Targets:'; foreach ($$entry in $$targets) { Write-Output ('  make ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Common variables:'; foreach ($$entry in $$vars) { Write-Output ('  ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Examples:'; $$examples = @('make run','make setup MODE=venv','make run ACTION=e2e CONFIG_PROFILE=strict PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all','make run ACTION=verify-readiness CONFIG_PROFILE=context START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all','make run ACTION=phase1-close','make run ACTION=phase2-preflight CONFIG_PROFILE=context','make run ACTION=run-live CONFIG_PROFILE=context RUN_LIVE_ARGS=''--runtime-minutes 30 --lookback-hours 8''','make qa SUITE=dead-code','make clean SCOPE=all'); foreach ($$e in $$examples) { Write-Output ('  ' + $$e) }"
+
+_setup_venv:
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; if (!(Test-Path '$(PYTHON)')) { py -3.14 -m venv $(VENV) }; if (!(Test-Path '$(VENV)\\Scripts\\pip.exe')) { & '$(PYTHON)' -m ensurepip --upgrade --default-pip }"
 	$(PYTHON) -c "import sys; assert sys.version_info[:3] == (3, 14, 3), f'Python 3.14.3 required, got {sys.version.split()[0]}'"
 
-$(INSTALL_STAMP): $(INSTALL_DEPS) | venv
+$(INSTALL_STAMP): $(INSTALL_DEPS) | _setup_venv
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; & '$(PYTHON)' -m pip install -e .[dev]"
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(VENV)' | Out-Null; Set-Content -Path '$(INSTALL_STAMP)' -Value (Get-Date -Format o)"
 
-install: $(INSTALL_STAMP) ## Install project and dev dependencies into .venv.
+_setup_install: $(INSTALL_STAMP)
+	powershell -NoProfile -Command "Write-Output 'setup: MODE=install complete'"
 
-validate-config: install ## Validate config schema and runtime settings.
+setup: ## Create/repair .venv, enforce Python 3.14.3, and optionally install deps.
+	$(call require_choice,$(MODE),$(VALID_MODES),MODE)
+	$(MAKE) _setup_$(MODE)
+
+_run_validate-config:
 	$(PYTHON) -m sma_outfits.cli validate-config --config $(ACTIVE_CONFIG)
 
-discover-range: install ## Discover earliest available data range and write manifest.
+_run_discover-range:
 	$(PYTHON) -m sma_outfits.cli discover-range --config $(ACTIVE_CONFIG) $(SYMBOLS_ARG) $(TIMEFRAMES_ARG) --output $(DISCOVER_RANGE_OUTPUT) --start $(DISCOVER_START) --end $(READINESS_END)
 
-verify-readiness: install ## Run readiness acceptance checks and write JSON summary.
+_run_verify-readiness:
 	$(PYTHON) -m sma_outfits.cli verify-readiness --config $(ACTIVE_CONFIG) --start $(START) --end $(END) $(SYMBOLS_ARG) $(TIMEFRAMES_ARG) --output $(READINESS_ACCEPTANCE_OUTPUT) $(VERIFY_READINESS_ARGS)
 
-paper-hardening-init: install ## Generate Part-2 hardening scaffold manifest from current config.
+_run_paper-hardening-init:
 	$(PYTHON) -m sma_outfits.cli paper-hardening-init --config $(ACTIVE_CONFIG) --output $(PAPER_HARDENING_INIT_OUTPUT)
 
-phase2-preflight: ## Generate Part-2 hardening manifest and run component gate.
-	$(MAKE) paper-hardening-init
-	$(MAKE) test-part2-components
-
-test-part2-components: install ## Run Part-2 live/reconciliation/readiness component tests.
+_qa_part2:
 	$(call run_pytest_preflight)
 	$(PYTHON) -m pytest $(PART2_TEST_PATHS)
 
-test: install ## Run full test suite.
+_run_phase2-preflight:
+	$(MAKE) _run_paper-hardening-init
+	$(MAKE) _qa_part2
+
+_qa_full:
 	$(call run_pytest_preflight)
 	$(PYTHON) -m pytest
 
-dead-code-check: install ## Run dead-code analysis gate.
+_qa_dead-code:
 	$(PYTHON) -m vulture src --min-confidence 90 --ignore-names cls,settings_cls,init_settings,env_settings,file_secret_settings
 
-backfill: install ## Backfill selected symbols/timeframes over START..END.
+_qa_all:
+	$(MAKE) _qa_full
+	$(MAKE) _qa_dead-code
+
+_run_backfill:
 	$(PYTHON) -m sma_outfits.cli backfill --config $(ACTIVE_CONFIG) $(BACKFILL_SYMBOLS_ARG) --start $(START) --end $(END) $(BACKFILL_TIMEFRAMES_ARG)
 
-replay: install ## Replay selected symbols/timeframes over START..END.
+_run_replay:
 	$(PYTHON) -m sma_outfits.cli replay --config $(ACTIVE_CONFIG) --start $(START) --end $(END) $(REPLAY_SYMBOLS_ARG) $(REPLAY_TIMEFRAMES_ARG)
 
-run-live: install ## Run live execution path.
+_run_run-live:
 	$(PYTHON) -m sma_outfits.cli run-live --config $(ACTIVE_CONFIG) $(RUN_LIVE_ARGS)
 
-report: install ## Build report artifacts (optionally with REPORT_RANGE).
+_run_report:
 	$(PYTHON) -m sma_outfits.cli report --config $(ACTIVE_CONFIG) $(if $(strip $(REPORT_RANGE)),--range $(REPORT_RANGE),)
 
-migrate-storage-layout: install ## Migrate storage layout in non-dry-run mode.
+_run_migrate-storage-layout:
 	$(PYTHON) -m sma_outfits.cli migrate-storage-layout --config $(ACTIVE_CONFIG) --no-dry-run
 
-preflight-storage: ## Check free disk space for heavier profile runs.
+_run_preflight-storage:
 	$(call run_storage_preflight,$(PROFILE))
 
-e2e: preflight-storage ## Run staged non-live pipeline and write run manifest.
+_run_e2e:
+	$(MAKE) _run_preflight-storage
 	$(call set_pipe_context_e2e)
 	$(call run_pipeline)
 
-phase1-close: ## Run isolated 2-profile closure protocol twice and verify deterministic readiness.
+_run_phase1-close:
 	powershell -NoProfile -File scripts/phase1_close.ps1 -MakeCommand "$(MAKE)" -Profile "$(PHASE1_CLOSE_PROFILE)" -Start "$(PHASE1_CLOSE_START)" -End "$(PHASE1_CLOSE_END)" -Symbols "$(PHASE1_CLOSE_SYMBOLS)" -Timeframes "$(PHASE1_CLOSE_TIMEFRAMES)" -Stages "$(PHASE1_CLOSE_STAGES)" -VerifyReadinessArgs "$(VERIFY_READINESS_ARGS)" -OutputPath "$(PHASE1_CLOSE_OUTPUT)" -OutputLabel "$(PHASE1_CLOSE_LABEL)" -ArchiveRoot "$(PHASE1_CLOSE_ARCHIVE_ROOT)"
 
-clean: ## Remove artifacts, caches, and build outputs (keeps .venv).
+run: ## Run the primary workflow selected by ACTION.
+	$(call require_choice,$(ACTION),$(VALID_ACTIONS),ACTION)
+	$(if $(filter $(ACTION),preflight-storage),,$(MAKE) setup MODE=install)
+	$(MAKE) _run_$(ACTION)
+
+qa: ## Run the QA suite selected by SUITE.
+	$(call require_choice,$(SUITE),$(VALID_SUITES),SUITE)
+	$(MAKE) setup MODE=install
+	$(MAKE) _qa_$(SUITE)
+
+_clean_default:
 	powershell -NoProfile -Command "$$targets = @('artifacts', '.tmp', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'htmlcov', 'build', 'dist'); foreach ($$t in $$targets) { if (Test-Path -LiteralPath $$t) { cmd /d /c ('rmdir /s /q ""{0}""' -f $$t) | Out-Null; if (Test-Path -LiteralPath $$t) { throw ('Failed to remove ' + $$t) } } }; $$scanRoots = @(Get-ChildItem -Path . -Directory -Force | Where-Object { $$_.Name -notin @('.venv', '.git') } | ForEach-Object { $$_.FullName }); if ($$scanRoots.Count -gt 0) { Get-ChildItem -Path $$scanRoots -Recurse -Directory -Filter '__pycache__' -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem -Path $$scanRoots -Recurse -File -Include '*.pyc','*.pyo' -Force -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue }; Get-ChildItem -Path . -Directory -Filter '*.egg-info' -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem -Path . -File -Include '*.pyc','*.pyo' -Force -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue"
 
-clean-all: clean ## Run clean and also remove .venv.
+_clean_all:
+	$(MAKE) _clean_default
 	powershell -NoProfile -Command "if (Test-Path '$(VENV)') { Remove-Item -Recurse -Force '$(VENV)' }"
+
+clean: ## Remove artifacts, caches, and build outputs; use SCOPE=all to also remove .venv.
+	$(call require_choice,$(SCOPE),$(VALID_SCOPES),SCOPE)
+	$(MAKE) _clean_$(SCOPE)
 

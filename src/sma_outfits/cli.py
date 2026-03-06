@@ -401,10 +401,10 @@ def _build_paper_hardening_init_payload(
         "capabilities": capabilities,
         "blocking_gaps": blocking_gaps,
         "next_commands": [
-            "make phase2-preflight CONFIG_PROFILE=context",
-            "make run-live CONFIG_PROFILE=context",
+            "make run ACTION=phase2-preflight CONFIG_PROFILE=context",
+            "make run ACTION=run-live CONFIG_PROFILE=context",
             (
-                "make verify-readiness CONFIG_PROFILE=context "
+                "make run ACTION=verify-readiness CONFIG_PROFILE=context "
                 "START=2024-12-31T05:00:00Z END=2026-02-28T00:00:00Z "
                 "UNIVERSE=all TIMEFRAME_SET=all"
             ),
