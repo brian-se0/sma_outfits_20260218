@@ -1,93 +1,104 @@
 # Make Commands
 
-This file documents the Make targets in this repository and the flags (Make variables) each target can take.
+This file documents the current `Makefile` interface. The supported runtime profile contract is `strict` and `context` only.
+
+`context` is the default operational source-aligned lane. `strict` is the baseline research/comparator lane. `CONFIG_PROFILE=replication` is no longer supported and hard-fails.
 
 ## Targets
 
 | Target | Purpose | Common flags |
 |---|---|---|
-| `make help` | Print available targets, variables, and examples. | None |
-| `make venv` | Create/repair `.venv` and enforce Python `3.14.3`. | None |
-| `make install` | Install package + dev dependencies into `.venv` (`-e .[dev]`). | None |
-| `make validate-config` | Validate config schema and settings. | `CONFIG_PROFILE`, `STRICT_CONFIG_PATH`, `REPLICATION_CONFIG_PATH`, `CONTEXT_CONFIG_PATH` |
-| `make discover-range` | Discover earliest available bars and write readiness range manifest. | `CONFIG_PROFILE`, `STRICT_CONFIG_PATH`, `REPLICATION_CONFIG_PATH`, `CONTEXT_CONFIG_PATH`, `SYMBOLS`, `TIMEFRAMES`, `UNIVERSE`, `TIMEFRAME_SET`, `DISCOVER_START`, `READINESS_END`, `DISCOVER_RANGE_OUTPUT` |
-| `make verify-readiness` | Verify readiness acceptance checks and write JSON summary. | `CONFIG_PROFILE`, `STRICT_CONFIG_PATH`, `REPLICATION_CONFIG_PATH`, `CONTEXT_CONFIG_PATH`, `START`, `END`, `SYMBOLS`, `TIMEFRAMES`, `UNIVERSE`, `TIMEFRAME_SET`, `READINESS_ACCEPTANCE_OUTPUT`, `VERIFY_READINESS_ARGS` |
-| `make test` | Run the test suite. | None |
-| `make dead-code-check` | Run dead-code gate via `vulture`. | None |
-| `make backfill` | Backfill bars for selected symbols/timeframes/date range. | `CONFIG_PROFILE`, `STRICT_CONFIG_PATH`, `REPLICATION_CONFIG_PATH`, `CONTEXT_CONFIG_PATH`, `START`, `END`, `BACKFILL_SYMBOLS`, `BACKFILL_TIMEFRAMES`, plus selection defaults (`SYMBOLS`, `TIMEFRAMES`, `UNIVERSE`, `TIMEFRAME_SET`, `PROFILE`) |
-| `make replay` | Replay routes/signals for selected symbols/timeframes/date range. | `CONFIG_PROFILE`, `STRICT_CONFIG_PATH`, `REPLICATION_CONFIG_PATH`, `CONTEXT_CONFIG_PATH`, `START`, `END`, `REPLAY_SYMBOLS`, `REPLAY_TIMEFRAMES`, plus selection defaults (`SYMBOLS`, `TIMEFRAMES`, `UNIVERSE`, `TIMEFRAME_SET`, `PROFILE`) |
-| `make run-live` | Run live execution path. | `CONFIG_PROFILE`, `STRICT_CONFIG_PATH`, `REPLICATION_CONFIG_PATH`, `CONTEXT_CONFIG_PATH` |
-| `make report` | Build report artifacts. | `CONFIG_PROFILE`, `STRICT_CONFIG_PATH`, `REPLICATION_CONFIG_PATH`, `CONTEXT_CONFIG_PATH`, `REPORT_RANGE` |
-| `make migrate-storage-layout` | Migrate storage layout in non-dry-run mode. | `CONFIG_PROFILE`, `STRICT_CONFIG_PATH`, `REPLICATION_CONFIG_PATH`, `CONTEXT_CONFIG_PATH` |
-| `make preflight-storage` | Check free disk space for large profiles before heavy runs. | `PROFILE`, `MIN_FREE_GB` |
-| `make e2e` | End-to-end orchestrator for `validate-config`, `backfill`, `replay`, `report` by stage, then writes run manifest. | `CONFIG_PROFILE`, `STRICT_CONFIG_PATH`, `REPLICATION_CONFIG_PATH`, `CONTEXT_CONFIG_PATH`, `PROFILE`, `STAGES`, `UNIVERSE`, `TIMEFRAME_SET`, `START`, `END`, `SYMBOLS`, `TIMEFRAMES`, `BACKFILL_SYMBOLS`, `BACKFILL_TIMEFRAMES`, `REPLAY_SYMBOLS`, `REPLAY_TIMEFRAMES`, `ANALYSIS_START`, `ANALYSIS_END`, `WARMUP_DAYS`, `WARMUP_START`, `BACKFILL_START`, `BACKFILL_END`, `REPLAY_START`, `REPLAY_END`, `REPORT_RANGE`, `MIN_FREE_GB` |
-| `make clean` | Remove artifacts, caches, and build outputs (keeps `.venv`). | None |
+| `make help` | Print targets, variables, and examples derived from the `Makefile`. | None |
+| `make venv` | Create or repair `.venv` and enforce Python `3.14.3`. | None |
+| `make install` | Install the package and dev dependencies into `.venv`. | None |
+| `make validate-config` | Validate the active config file. | `CONFIG_PROFILE`, config path overrides |
+| `make discover-range` | Discover earliest available bars and write a manifest. | `CONFIG_PROFILE`, selection flags, `DISCOVER_START`, `READINESS_END`, `DISCOVER_RANGE_OUTPUT` |
+| `make verify-readiness` | Run readiness acceptance checks and write a JSON summary. | `CONFIG_PROFILE`, selection flags, `START`, `END`, `READINESS_ACCEPTANCE_OUTPUT`, `VERIFY_READINESS_ARGS` |
+| `make paper-hardening-init` | Generate the Part 2 hardening scaffold manifest. | `CONFIG_PROFILE`, `PAPER_HARDENING_INIT_OUTPUT` |
+| `make phase2-preflight` | Run `paper-hardening-init` and `test-part2-components` in sequence. | `CONFIG_PROFILE`, `PAPER_HARDENING_INIT_OUTPUT`, `PART2_TEST_PATHS` |
+| `make test-part2-components` | Run the Part 2 component gate tests. | `PART2_TEST_PATHS` |
+| `make test` | Run the full test suite. | None |
+| `make dead-code-check` | Run the dead-code gate via `vulture`. | None |
+| `make backfill` | Backfill selected symbols and timeframes over `START..END`. | `CONFIG_PROFILE`, selection flags, `START`, `END` |
+| `make replay` | Replay selected symbols and timeframes over `START..END`. | `CONFIG_PROFILE`, selection flags, `START`, `END` |
+| `make run-live` | Run the live execution path. | `CONFIG_PROFILE`, `RUN_LIVE_ARGS` |
+| `make report` | Build report artifacts. | `CONFIG_PROFILE`, `REPORT_RANGE` |
+| `make migrate-storage-layout` | Migrate storage layout in non-dry-run mode. | `CONFIG_PROFILE` |
+| `make preflight-storage` | Check free disk space before heavy profiles. | `PROFILE`, `MIN_FREE_GB` |
+| `make e2e` | Orchestrate `validate-config`, `backfill`, `replay`, and `report`, then write a run manifest. | `CONFIG_PROFILE`, range flags, selection flags, stage flags, warmup/report flags |
+| `make phase1-close` | Run the 2-profile x 2-pass deterministic Phase 1 recheck protocol and archive manifests. | `PHASE1_CLOSE_*`, `VERIFY_READINESS_ARGS` |
+| `make clean` | Remove artifacts, caches, and build outputs while keeping `.venv`. | None |
 | `make clean-all` | Run `clean` and also remove `.venv`. | None |
 
-## Flag Reference
+## Core Flags
 
-### Core config and selection
+- `CONFIG_PROFILE`: Allowed values are `strict`, `context`. Default: `context`.
+- `STRICT_CONFIG_PATH`: Default strict config path.
+- `CONTEXT_CONFIG_PATH`: Default context config path.
+- `ACTIVE_CONFIG`: Derived from `CONFIG_PROFILE`. Invalid profiles hard-fail.
+- `PROFILE`: Range preset. Allowed values: `smoke`, `day`, `week`, `month`, `max`, `max_common`, `custom`.
+- `UNIVERSE`: Symbol preset. Allowed values: `core`, `core_expanded`, `all_stocks`, `all`.
+- `TIMEFRAME_SET`: Timeframe preset. Allowed values: `core`, `all`.
+- `SYMBOLS`: CSV symbol override.
+- `TIMEFRAMES`: CSV timeframe override.
+- `BACKFILL_SYMBOLS`, `BACKFILL_TIMEFRAMES`: Stage-specific backfill overrides.
+- `REPLAY_SYMBOLS`, `REPLAY_TIMEFRAMES`: Stage-specific replay overrides.
+- `STAGES`: CSV subset of `validate-config,backfill,replay,report` used by `make e2e`.
 
-- `CONFIG_PROFILE`: Config selector. Allowed: `strict`, `replication`, `context`. Default: `context`.
-- `STRICT_CONFIG_PATH`: Strict-profile config path. Default: `configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml`.
-- `REPLICATION_CONFIG_PATH`: Replication-profile config path. Default: `configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml`.
-- `CONTEXT_CONFIG_PATH`: Context-profile config path. Default: `configs/settings.jan2025_confluence_atr_svix211_106_crossctx_context_v1.yaml`.
-- `ACTIVE_CONFIG`: Derived variable selected from `CONFIG_PROFILE` (`STRICT_CONFIG_PATH`, `REPLICATION_CONFIG_PATH`, or `CONTEXT_CONFIG_PATH`). Invalid `CONFIG_PROFILE` values hard-fail.
-- `PROFILE`: Preset range profile for runs. Allowed: `smoke`, `day`, `week`, `month`, `max`, `custom`.
-- `UNIVERSE`: Symbol set preset. Allowed: `core`, `core_expanded`, `all_stocks`, `all`.
-  - `core` -> `QQQ,RWM`
-  - `core_expanded` -> curated expanded list
-  - `all_stocks` -> fixed symbol list in `Makefile`
-  - `all` -> do not pass symbol filter to CLI
-- `TIMEFRAME_SET`: Timeframe preset. Allowed: `core` (`30m,1h`) or `all` (no timeframe filter).
-- `SYMBOLS`: CSV override for symbols. If set, this overrides the profile/universe expansion.
-- `TIMEFRAMES`: CSV override for timeframes. If set, this overrides `TIMEFRAME_SET` expansion.
-- `BACKFILL_SYMBOLS`: CSV override used by `make backfill` and `make e2e` backfill stage. Default: `SYMBOLS`.
-- `BACKFILL_TIMEFRAMES`: CSV override used by `make backfill` and `make e2e` backfill stage. Default: `TIMEFRAMES`.
-- `REPLAY_SYMBOLS`: CSV override used by `make replay` and `make e2e` replay stage. Default: `SYMBOLS`.
-- `REPLAY_TIMEFRAMES`: CSV override used by `make replay` and `make e2e` replay stage. Default: `TIMEFRAMES`.
-- `STAGES`: CSV subset of `validate-config,backfill,replay,report` for `make e2e`. Invalid values hard-fail.
+## Range and Readiness Flags
 
-### Date/range flags
+- `START`, `END`: Explicit UTC timestamps. Required when `PROFILE=custom`.
+- `ALPACA_BASIC_HISTORICAL_START`: Default free-tier historical anchor.
+- `ALPACA_BASIC_HISTORICAL_DELAY_MINUTES`: Default historical lag offset.
+- `MAX_START`, `MAX_END`: Derived bounds for `PROFILE=max`.
+- `DISCOVER_START`: Lower bound probe start for `discover-range`.
+- `READINESS_END`: Upper bound for readiness/discovery workflows.
+- `DISCOVER_RANGE_OUTPUT`: Output path for `discover-range`.
+- `READINESS_ACCEPTANCE_OUTPUT`: Output path for `verify-readiness`.
+- `FULL_RANGE_START`: Auto-loaded from `DISCOVER_RANGE_OUTPUT.full_range_start` when present.
+- `COMMON_ANALYSIS_START`: Auto-computed analysis start for `PROFILE=max_common`.
+- `WARMUP_DAYS`: Warmup length used by `make e2e`.
+- `ANALYSIS_START`, `ANALYSIS_END`: Analysis/report window used by `make e2e`.
+- `WARMUP_START`: Computed warmup boundary.
+- `BACKFILL_START`, `BACKFILL_END`: Backfill window used by `make e2e`.
+- `REPLAY_START`, `REPLAY_END`: Replay window used by `make e2e`.
+- `REPORT_RANGE`: Report window. For `make e2e`, defaults to `ANALYSIS_START,ANALYSIS_END`.
+- `VERIFY_READINESS_ARGS`: Extra flags appended to `verify-readiness`.
 
-- `START`: Start timestamp (`YYYY-MM-DDTHH:MM:SSZ`).
-- `END`: End timestamp (`YYYY-MM-DDTHH:MM:SSZ`).
-- `ALPACA_BASIC_HISTORICAL_START`: Free-tier historical start anchor. Default: `2016-01-01T00:00:00Z`.
-- `ALPACA_BASIC_HISTORICAL_DELAY_MINUTES`: Free-tier historical delay offset. Default: `15`.
-- `MAX_START`: Default start for `PROFILE=max`. Default: `ALPACA_BASIC_HISTORICAL_START`.
-- `MAX_END`: Default end for `PROFILE=max`. Default: current UTC minus `ALPACA_BASIC_HISTORICAL_DELAY_MINUTES`.
-- `ANALYSIS_START`: Analysis/report window start for `e2e`. Default: `START`.
-- `ANALYSIS_END`: Analysis/report window end for `e2e`. Default: `END`.
-- `WARMUP_DAYS`: Warmup days subtracted from `ANALYSIS_START` to derive warmup start. Default: `120`.
-- `WARMUP_START`: Warmup start timestamp. Default: computed from `ANALYSIS_START - WARMUP_DAYS`.
-- `BACKFILL_START`: Backfill start for `e2e`. Default: computed warmup start.
-- `BACKFILL_END`: Backfill end for `e2e`. Default: `ANALYSIS_END`.
-- `REPLAY_START`: Replay start for `e2e`. Default: computed warmup start.
-- `REPLAY_END`: Replay end for `e2e`. Default: `ANALYSIS_END`.
+## Phase 2 Flags
 
-### E2E/report orchestration
+- `PAPER_HARDENING_INIT_OUTPUT`: Output path for `paper-hardening-init`.
+- `PART2_TEST_PATHS`: Pytest paths used by `test-part2-components`.
+- `RUN_LIVE_ARGS`: Extra flags forwarded to `run-live`.
 
-- `REPORT_RANGE`: `start,end` window for `report`.
-  - For standalone `make report`, passed directly.
-  - For `make e2e`, defaults to `ANALYSIS_START,ANALYSIS_END` if unset.
+## Phase 1 Closure Flags
 
-### Readiness-specific flags
+- `PHASE1_CLOSE_PROFILE`: `e2e` profile used during closure. Default: `custom`.
+- `PHASE1_CLOSE_START`, `PHASE1_CLOSE_END`: Fixed closure timestamps.
+- `PHASE1_CLOSE_SYMBOLS`, `PHASE1_CLOSE_TIMEFRAMES`: Fixed closure selection scope.
+- `PHASE1_CLOSE_STAGES`: `e2e` stage list used during closure.
+- `PHASE1_CLOSE_OUTPUT`: Summary JSON path. Default: `artifacts/readiness/phase1_recheck_acceptance.json`.
+- `PHASE1_CLOSE_LABEL`: Label suffix used in per-pass manifest names. Default: `phase1recheck`.
+- `PHASE1_CLOSE_ARCHIVE_ROOT`: Root directory used for archived per-pass manifests. Default: `audit/phase1_rechecks`.
 
-- `DISCOVER_START`: Earliest probe start used by `discover-range`. Default: `ALPACA_BASIC_HISTORICAL_START`.
-- `READINESS_END`: End timestamp used in readiness runs. Default: `MAX_END`.
-- `DISCOVER_RANGE_OUTPUT`: Output JSON path for `discover-range`. Default: `artifacts/readiness/discovered_range_manifest.json`.
-- `READINESS_ACCEPTANCE_OUTPUT`: Output JSON path for `verify-readiness`. Default: `artifacts/readiness/readiness_acceptance.json`.
-- `FULL_RANGE_START`: Convenience variable auto-read from `DISCOVER_RANGE_OUTPUT.full_range_start` when present.
-- `VERIFY_READINESS_ARGS`: Extra flags appended to `verify-readiness` CLI invocation (for example `--require-academic-validation`).
+## Storage Safety
 
-### Storage safety
+- `MIN_FREE_GB`: Free disk threshold enforced by `preflight-storage` and `make e2e` for heavier profiles.
 
-- `MIN_FREE_GB`: Required free disk threshold used by `preflight-storage` (and therefore `e2e`). Default: `50`.
+## Precedence Notes
 
-## Notes on precedence
+- Command-line variable overrides take precedence over profile-derived defaults.
+- `SYMBOLS` and `TIMEFRAMES` override `UNIVERSE` and `TIMEFRAME_SET`.
+- Stage-specific symbol/timeframe flags override the base `SYMBOLS` and `TIMEFRAMES`.
+- `make phase2-preflight` reuses whatever `CONFIG_PROFILE` and output/test overrides you pass to the top-level command.
 
-- Explicit variables passed on the command line (for example `make e2e START=...`) take precedence over profile-derived defaults.
-- `CONFIG_PROFILE` selects `ACTIVE_CONFIG` before target execution; `STRICT_CONFIG_PATH`, `REPLICATION_CONFIG_PATH`, and `CONTEXT_CONFIG_PATH` can be overridden for controlled profile-path changes.
-- `SYMBOLS` and `TIMEFRAMES` overrides take precedence over `UNIVERSE` and `TIMEFRAME_SET` presets.
-- `BACKFILL_SYMBOLS`/`BACKFILL_TIMEFRAMES` and `REPLAY_SYMBOLS`/`REPLAY_TIMEFRAMES` override stage-specific symbol/timeframe scope.
-- `PROFILE=custom` requires both `START` and `END`.
+## Common Examples
+
+```powershell
+make e2e
+make e2e CONFIG_PROFILE=strict PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all
+make verify-readiness CONFIG_PROFILE=context START=$env:FULL_RANGE_START END=$env:READINESS_END UNIVERSE=all_stocks TIMEFRAME_SET=all
+make phase1-close
+make phase2-preflight CONFIG_PROFILE=context
+make run-live CONFIG_PROFILE=context RUN_LIVE_ARGS='--runtime-minutes 30 --lookback-hours 8'
+```

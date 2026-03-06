@@ -9,6 +9,5 @@ def test_config_directory_contains_only_canonical_profiles() -> None:
 
     assert yaml_names == [
         "settings.jan2025_confluence_atr_svix211_106_crossctx_context_v1.yaml",
-        "settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml",
         "settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml",
     ]

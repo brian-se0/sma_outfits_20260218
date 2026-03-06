@@ -44,9 +44,6 @@ _ALPACA_BASIC_HISTORICAL_DELAY_MINUTES = 15
 _STRICT_CONFIG_PATH = Path(
     "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_v1.yaml"
 )
-_REPLICATION_CONFIG_PATH = Path(
-    "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_replication_v1.yaml"
-)
 _CONTEXT_CONFIG_PATH = Path(
     "configs/settings.jan2025_confluence_atr_svix211_106_crossctx_context_v1.yaml"
 )
@@ -404,7 +401,7 @@ def _build_paper_hardening_init_payload(
         "capabilities": capabilities,
         "blocking_gaps": blocking_gaps,
         "next_commands": [
-            "make test-part2-components",
+            "make phase2-preflight CONFIG_PROFILE=context",
             "make run-live CONFIG_PROFILE=context",
             (
                 "make verify-readiness CONFIG_PROFILE=context "

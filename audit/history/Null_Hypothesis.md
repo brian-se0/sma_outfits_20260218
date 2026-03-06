@@ -1,3 +1,7 @@
+# Historical Note
+
+This document is preserved as historical analysis from 2026-02-24, when `replication` was still treated as an active runtime lane. As of 2026-03-06, the current runtime contract supports only `strict` and `context`.
+
 # Null Hypothesis Assessment
 
 Date of assessment: 2026-02-24 (UTC)  

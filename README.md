@@ -8,7 +8,7 @@ Explicit analysis of SMA outfit (blackbox) use in public equity markets for real
 - Free-tier data bounds: defaults assume Alpaca Basic historical equities availability since `2016-01-01` and apply a `15` minute historical lag buffer.
 - Precision disclaimer: reports are bar-level approximations (`1m+`) and cannot reproduce tick/second/millisecond execution granularity from source examples.
 - Config contract: no legacy `strategy.mode`; behavior is route/config driven.
-- Profile contract: `context` is the operational default lane for source-aligned runs; `strict` and `replication` remain baseline research lanes.
+- Profile contract: `context` is the operational default lane for source-aligned runs, `strict` is the baseline research/comparator lane, and `replication` is no longer a supported runtime profile.
 - SVIX contract: outfit label key remains `211` in notation while operative strike levels may be route/context-specific (for example `844` or `422`).
 - Reporting contract: canonical `both` attribution only (`strike_attribution` + `close_attribution`).
 - Live/replay parity: `atr_dynamic_stop` and `cross_symbol_context` are supported in both modes.
@@ -21,20 +21,19 @@ Explicit analysis of SMA outfit (blackbox) use in public equity markets for real
 
 - Operational default workflow:
   - `make e2e` (defaults to `CONFIG_PROFILE=context`)
-- Strict canonical workflow:
+- Phase 1 deterministic closeout:
+  - `make phase1-close`
+- Strict baseline workflow:
   - `make e2e CONFIG_PROFILE=strict PROFILE=month`
-- Replication alignment workflow:
-  - `make e2e CONFIG_PROFILE=replication PROFILE=month`
 - Context alignment workflow (operational):
   - `make e2e CONFIG_PROFILE=context PROFILE=month`
-- Part-2 scaffold init:
-  - `make paper-hardening-init CONFIG_PROFILE=context`
-- Part-2 component gate:
-  - `make test-part2-components`
+- Phase 2 preflight:
+  - `make phase2-preflight CONFIG_PROFILE=context`
 - Interpretation:
-  - Context is the default operational source-alignment lane.
-  - Supported profiles are `strict`, `context`, and `replication` only.
-  - Strict/replication remain baseline gates for research and robustness review.
+  - `context` is the default operational source-alignment lane.
+  - `strict` is the baseline research/comparator lane.
+  - Supported runtime profiles are `strict` and `context` only.
+  - `CONFIG_PROFILE=replication` now hard-fails.
 
 ## Repository Structure
 This repository is organized to provide a comprehensive understanding of SMA (Simple Moving Average) outfits and their direct impact on market dynamics. Each directory contains specific resources tailored to different aspects of SMA analysis:

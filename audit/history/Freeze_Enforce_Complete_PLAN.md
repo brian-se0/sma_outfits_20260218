@@ -1,3 +1,7 @@
+# Historical Note
+
+This plan reflects a superseded three-profile model that treated `replication` as an active runtime lane. It is preserved for audit history only. As of 2026-03-06, the current runtime contract supports only `strict` and `context`; see `Phase2_PLAN.md` for the current forward plan.
+
 # Implementation Plan: Freeze Production Candidate + Enforce Lane Immutability + Complete Live-Paper Ops Gate
 
 ## Summary

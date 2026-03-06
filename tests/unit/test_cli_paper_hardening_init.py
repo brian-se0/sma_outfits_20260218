@@ -29,6 +29,7 @@ def test_build_paper_hardening_init_payload_exposes_known_capabilities(settings)
     assert "missing_broker_order_submission" in ids
     assert "missing_fill_callback_processing" in ids
     assert "missing_drawdown_alerting" in ids
+    assert payload["next_commands"][0] == "make phase2-preflight CONFIG_PROFILE=context"
 
 
 def test_paper_hardening_init_writes_manifest_and_hash(
@@ -54,3 +55,4 @@ def test_paper_hardening_init_writes_manifest_and_hash(
     assert payload["status"] == "ok"
     assert "next_commands" in payload
     assert payload["next_commands"]
+    assert "make phase2-preflight CONFIG_PROFILE=context" in payload["next_commands"]

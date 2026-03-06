@@ -46,7 +46,7 @@ function Get-Sha256Hex {
     return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
 }
 
-$profiles = @("strict", "context", "replication")
+$profiles = @("strict", "context")
 $passes = @("iso1", "iso2")
 $results = @()
 

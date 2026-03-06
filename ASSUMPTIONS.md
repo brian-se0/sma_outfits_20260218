@@ -1,15 +1,16 @@
 # Assumptions and Ambiguities
 
 ## Runtime and Execution
-1. Python `3.14.3` is mandatory and validated at CLI runtime and via `make check-python`.
+1. Python `3.14.3` is mandatory and validated at CLI runtime and via `make venv`.
 2. Workflows are only exposed via `Makefile` targets.
 3. Required Alpaca keys are loaded from `.env.local`; missing keys are hard errors.
 
 ## Profile Operations
 1. Default CLI/Make operational profile is `context`.
-2. `context` is the official operational lane; only `strict`, `context`, and `replication` are supported profiles.
-3. `strict` and `replication` remain baseline comparison lanes for research/robustness validation.
-4. Part-2 initialization runs through `make paper-hardening-init`; Part-2 component checks run through `make test-part2-components`.
+2. `context` is the official operational lane; only `strict` and `context` are supported runtime profiles.
+3. `strict` remains the baseline comparison lane for research and robustness validation; `replication` is historical only.
+4. Phase 1 closure runs through `make phase1-close`.
+5. Part 2 preflight runs through `make phase2-preflight`, which sequences `make paper-hardening-init` and `make test-part2-components`.
 
 ## Data and Market Logic
 1. Session filtering defaults to regular U.S. hours (`09:30-16:00 America/New_York`) for non-crypto symbols.
