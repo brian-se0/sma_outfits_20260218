@@ -1,5 +1,7 @@
 # End of Phase 1 Report
 
+Archive note: this document was moved under `docs/history/phase1/` as part of the Phase 2 documentation cleanup.
+
 Historical note: this report documents the historical three-profile Phase 1 closeout executed on 2026-03-05. As of 2026-03-06, the current runtime contract has been simplified to `strict` and `context`; `replication` remains in this report only as historical evidence.
 
 Date: 2026-03-05  
@@ -196,10 +198,10 @@ The historical `replication` closeout evidence remains preserved in archived art
 
 ### Current documentation after the March 6, 2026 simplification
 
-- `End_of_Phase1_Report.md` remains the canonical historical closeout record.
+- This file remains the canonical historical closeout record.
 - `Phase2_PLAN.md` is the current forward plan for Phase 2 hardening work.
 - `make_commands.md` documents the current two-profile `Makefile` surface.
-- Historical forward-plan and null-hypothesis documents currently remain at repository root; archival reorganization can be refreshed after the next Phase 1 rerun.
+- Supporting historical material now lives under `docs/history/`.
 
 ## Phase 2 Boundary (Current State)
 
@@ -221,16 +223,22 @@ Interpretation:
 
 ## Reproducibility Commands
 
-Historical closeout command:
+Historical closeout entrypoint at closeout time:
 
 ```powershell
 make phase1-close
 ```
 
+Current reproducibility rerun:
+
+```powershell
+make run ACTION=phase1-close
+```
+
 Current follow-on command shape:
 
 ```powershell
-make phase2-preflight CONFIG_PROFILE=context
+make run ACTION=phase2-preflight CONFIG_PROFILE=context
 ```
 
 ## Conclusion

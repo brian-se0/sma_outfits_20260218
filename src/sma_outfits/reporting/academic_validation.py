@@ -14,6 +14,7 @@ import pandas as pd
 import yaml
 
 from sma_outfits.config.models import CitationsConfig, ValidationConfig
+from sma_outfits.reporting.metrics import annualized_calmar_ratio, annualized_sharpe_ratio, max_drawdown
 from sma_outfits.utils import ensure_utc_timestamp
 
 _CITATION_REQUIRED_FIELDS = {
@@ -934,31 +935,17 @@ def _series_metrics(values: list[float]) -> dict[str, float | int]:
     series = np.array(values, dtype=float)
     mean_r = float(np.mean(series))
     total_r = float(np.sum(series))
-    std = float(np.std(series, ddof=1)) if series.size > 1 else 0.0
-    sharpe = (mean_r / std) * float(np.sqrt(252.0)) if std > 0 else 0.0
-    max_drawdown = _max_drawdown(values)
-    annualized_return = mean_r * 252.0
-    if max_drawdown < 0:
-        calmar = annualized_return / abs(max_drawdown)
-    else:
-        calmar = annualized_return if annualized_return > 0 else 0.0
+    sharpe = annualized_sharpe_ratio(values)
+    max_drawdown_r = max_drawdown(values)
+    calmar = annualized_calmar_ratio(values)
     return {
         "closed_trades": int(series.size),
         "mean_r": mean_r,
         "total_r": total_r,
         "sharpe_annualized": sharpe,
         "calmar_annualized": calmar,
-        "max_drawdown_r": max_drawdown,
+        "max_drawdown_r": max_drawdown_r,
     }
-
-
-def _max_drawdown(values: list[float]) -> float:
-    if not values:
-        return 0.0
-    equity = np.cumsum(np.array(values, dtype=float))
-    peaks = np.maximum.accumulate(equity)
-    drawdowns = equity - peaks
-    return float(np.min(drawdowns)) if drawdowns.size else 0.0
 
 
 def _write_png_rgb(*, path: Path, width: int, height: int, rgb: bytes) -> None:

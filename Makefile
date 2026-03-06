@@ -80,7 +80,7 @@ COMMON_ANALYSIS_START_COMPUTED := $(shell powershell -NoProfile -Command 'if ("$
 COMMON_ANALYSIS_START ?= $(COMMON_ANALYSIS_START_COMPUTED)## help: Auto-computed analysis start for PROFILE=max_common from FULL_RANGE_START + WARMUP_DAYS.
 VERIFY_READINESS_ARGS ?=## help: Extra verify-readiness CLI args (for example --require-academic-validation).
 PAPER_HARDENING_INIT_OUTPUT ?= artifacts/readiness/paper_hardening_init.json## help: Part-2 hardening scaffold manifest output path.
-PART2_TEST_PATHS ?= tests/integration/test_live_pipeline_mocked.py tests/unit/test_cli_readiness.py tests/integration/test_verify_readiness_academic_gate.py## help: Pytest paths for Part-2 component checks.
+PART2_TEST_PATHS ?= tests/unit/test_cli_paper_hardening_init.py tests/integration/test_live_pipeline_mocked.py tests/unit/test_cli_readiness.py tests/integration/test_verify_readiness_academic_gate.py## help: Pytest paths for Part-2 component checks.
 RUN_LIVE_ARGS ?=## help: Extra run-live CLI args (for example --runtime-minutes 30 --lookback-hours 8).
 PHASE1_CLOSE_PROFILE ?= custom## help: e2e profile for phase1-close protocol.
 PHASE1_CLOSE_START ?= 2022-03-31T15:30:00Z## help: Phase-1 closure protocol start timestamp.

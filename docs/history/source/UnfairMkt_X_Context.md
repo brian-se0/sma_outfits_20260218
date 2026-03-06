@@ -1,5 +1,7 @@
 # Historical Source Context
 
+Archive note: this document was moved under `docs/history/source/` as part of the Phase 2 documentation cleanup.
+
 This document preserves broader original-project and X/Twitter context. It is not the implementation contract for the current repository.
 
 - Current repository contract: Python `3.14.3`, Alpaca-only runtime/data paths, free-data constraints, and Makefile-driven workflows.

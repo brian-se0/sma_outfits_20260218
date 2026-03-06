@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import numpy as np
 
 from sma_outfits.config.models import ExecutionCostsConfig
+from sma_outfits.reporting.metrics import annualized_calmar_ratio, annualized_sharpe_ratio, max_drawdown
 
 
 def build_execution_realism_overlay(
@@ -131,10 +131,9 @@ def _series_metrics(values: list[float]) -> dict[str, Any]:
         }
     samples = np.array(values, dtype=float)
     mean_value = float(np.mean(samples))
-    std_value = float(np.std(samples, ddof=1)) if samples.size > 1 else 0.0
-    sharpe = (mean_value / std_value) * math.sqrt(252.0) if std_value > 0 else 0.0
-    max_drawdown = _max_drawdown(values)
-    calmar = _calmar_ratio(values, max_drawdown=max_drawdown)
+    sharpe = annualized_sharpe_ratio(values)
+    max_drawdown_r = max_drawdown(values)
+    calmar = annualized_calmar_ratio(values)
     return {
         "closed_positions": int(samples.size),
         "total_realized_r": float(np.sum(samples)),
@@ -143,23 +142,5 @@ def _series_metrics(values: list[float]) -> dict[str, Any]:
         "max_realized_r": float(np.max(samples)),
         "sharpe_annualized": sharpe,
         "calmar_annualized": calmar,
-        "max_drawdown_r": max_drawdown,
+        "max_drawdown_r": max_drawdown_r,
     }
-
-
-def _max_drawdown(values: list[float]) -> float:
-    if not values:
-        return 0.0
-    equity = np.cumsum(np.array(values, dtype=float))
-    peaks = np.maximum.accumulate(equity)
-    drawdowns = equity - peaks
-    return float(np.min(drawdowns)) if drawdowns.size else 0.0
-
-
-def _calmar_ratio(values: list[float], *, max_drawdown: float) -> float:
-    if not values:
-        return 0.0
-    annualized_return = float(np.mean(np.array(values, dtype=float)) * 252.0)
-    if max_drawdown < 0:
-        return annualized_return / abs(max_drawdown)
-    return annualized_return if annualized_return > 0 else 0.0

@@ -21,6 +21,13 @@ from sma_outfits.reporting.execution_realism import (
     build_execution_realism_overlay,
     public_execution_realism_payload,
 )
+from sma_outfits.reporting.metrics import (
+    annualized_sharpe_ratio,
+    annualized_sortino_ratio,
+    max_drawdown,
+    max_time_under_water,
+    ulcer_index,
+)
 from sma_outfits.utils import ensure_utc_timestamp
 
 def build_summary(
@@ -1016,45 +1023,22 @@ def _risk_diagnostics(values: list[float]) -> dict[str, Any]:
             "annualization_assumption": "252 closed positions per year",
             "turnover_proxy_positions_per_month": 0.0,
         }
-    samples = np.array(values, dtype=float)
-    equity = np.cumsum(samples)
-    peaks = np.maximum.accumulate(equity)
-    drawdowns = equity - peaks
-    max_drawdown = float(drawdowns.min()) if drawdowns.size else 0.0
-    ulcer_index = float(math.sqrt(float(np.mean(np.square(drawdowns))))) if drawdowns.size else 0.0
-    max_tuw = _max_time_under_water(drawdowns.tolist())
-
-    mean_value = float(np.mean(samples))
-    std_value = float(np.std(samples, ddof=1)) if samples.size > 1 else 0.0
-    downside = samples[samples < 0.0]
-    downside_std = float(np.std(downside, ddof=1)) if downside.size > 1 else 0.0
-    annual_factor = math.sqrt(252.0)
-    sharpe = (mean_value / std_value) * annual_factor if std_value > 0 else 0.0
-    sortino = (mean_value / downside_std) * annual_factor if downside_std > 0 else 0.0
+    max_drawdown_r = max_drawdown(values)
+    ulcer_index_r = ulcer_index(values)
+    max_tuw = max_time_under_water(values)
+    sharpe = annualized_sharpe_ratio(values)
+    sortino = annualized_sortino_ratio(values)
     turnover_proxy = (len(values) / 12.0) if values else 0.0
 
     return {
-        "max_drawdown_r": max_drawdown,
-        "ulcer_index_r": ulcer_index,
+        "max_drawdown_r": max_drawdown_r,
+        "ulcer_index_r": ulcer_index_r,
         "max_time_under_water_bars": max_tuw,
         "sharpe_annualized": sharpe,
         "sortino_annualized": sortino,
         "annualization_assumption": "252 closed positions per year",
         "turnover_proxy_positions_per_month": turnover_proxy,
     }
-
-
-def _max_time_under_water(drawdowns: list[float]) -> int:
-    max_streak = 0
-    streak = 0
-    for value in drawdowns:
-        if value < 0:
-            streak += 1
-            if streak > max_streak:
-                max_streak = streak
-        else:
-            streak = 0
-    return max_streak
 
 
 def _uncertainty_summary(values: list[float]) -> dict[str, Any]:

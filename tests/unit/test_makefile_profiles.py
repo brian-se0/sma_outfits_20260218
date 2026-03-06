@@ -121,6 +121,7 @@ def test_makefile_preserves_phase2_and_phase1_dispatch_paths() -> None:
 
     assert "PAPER_HARDENING_INIT_OUTPUT ?=" in makefile
     assert "PART2_TEST_PATHS ?=" in makefile
+    assert "tests/unit/test_cli_paper_hardening_init.py" in makefile
     assert "RUN_LIVE_ARGS ?=" in makefile
     assert "_run_paper-hardening-init:" in makefile
     assert "_qa_part2:" in makefile
