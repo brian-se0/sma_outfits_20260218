@@ -67,5 +67,5 @@ The current runtime contract is:
 
 ## Historical References
 
-- Historical Phase 1 closeout record: `End_of_Phase1_Report.md`
-- Historical supporting docs currently remain at repository root pending post-rerun archival reorganization.
+- Historical Phase 1 closeout record: `docs/history/phase1/End_of_Phase1_Report.md`
+- Historical supporting docs: `docs/history/`

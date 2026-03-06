@@ -135,6 +135,7 @@ def _append_outcomes(
 def test_verify_readiness_fails_academic_gate_with_insufficient_edge(
     settings,
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     weak_settings = settings.model_copy(deep=True)
     weak_settings.validation.bootstrap.samples = 120
@@ -167,7 +168,7 @@ def test_verify_readiness_fails_academic_gate_with_insufficient_edge(
             end="2024-12-31T21:00:00Z",
             symbols="",
             timeframes="1m",
-            output=Path("ignored.json"),
+            output=tmp_path / "ignored.json",
             require_report_artifacts=False,
             require_gap_quality=False,
             require_run_manifest=False,

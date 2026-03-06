@@ -612,7 +612,7 @@ risk:
 
 archive:
   enabled: true
-  root: artifacts/svix211_106
+  root: artifacts/svix211_106/context
 
 ingest:
   empty_source_policy: fail
@@ -633,8 +633,8 @@ live:
   data_gap_threshold_seconds: 90
   symbol_stale_threshold_seconds: 180
 
-storage_root: artifacts/svix211_106/storage
-events_root: artifacts/svix211_106/events
+storage_root: artifacts/svix211_106/context/storage
+events_root: artifacts/svix211_106/context/events
 outfits_path: src/sma_outfits/config/outfits.yaml
 
 

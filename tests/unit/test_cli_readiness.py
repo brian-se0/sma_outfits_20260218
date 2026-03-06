@@ -105,7 +105,10 @@ def test_discover_range_writes_manifest_and_hash(tmp_path, monkeypatch, capsys) 
     assert all(row["symbol"] == "SPY" for row in payload["records"])
 
 
-def test_discover_range_fails_when_no_stock_symbols(monkeypatch) -> None:
+def test_discover_range_fails_when_no_stock_symbols(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
     monkeypatch.setattr(
         cli,
@@ -132,7 +135,7 @@ def test_discover_range_fails_when_no_stock_symbols(monkeypatch) -> None:
             config=None,
             symbols="",
             timeframes="",
-            output=Path("ignored.json"),
+            output=tmp_path / "ignored.json",
             start="2024-01-01T00:00:00Z",
             end="2025-01-01T00:00:00Z",
         )
@@ -200,6 +203,7 @@ def test_verify_readiness_writes_acceptance_manifest(
 def test_verify_readiness_fails_when_backfill_coverage_missing(
     settings,
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
     monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: settings)
@@ -227,7 +231,7 @@ def test_verify_readiness_fails_when_backfill_coverage_missing(
             end="2025-01-02T21:00:00Z",
             symbols="",
             timeframes="1m",
-            output=Path("ignored.json"),
+            output=tmp_path / "ignored.json",
             require_report_artifacts=False,
             require_run_manifest=False,
             require_academic_validation=False,
@@ -237,6 +241,7 @@ def test_verify_readiness_fails_when_backfill_coverage_missing(
 def test_verify_readiness_fails_when_boundary_coverage_violation_detected(
     settings,
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
     monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: settings)
@@ -265,7 +270,7 @@ def test_verify_readiness_fails_when_boundary_coverage_violation_detected(
             end="2025-02-10T21:00:00Z",
             symbols="",
             timeframes="1m",
-            output=Path("ignored.json"),
+            output=tmp_path / "ignored.json",
             require_report_artifacts=False,
             require_run_manifest=False,
             require_academic_validation=False,
@@ -275,6 +280,7 @@ def test_verify_readiness_fails_when_boundary_coverage_violation_detected(
 def test_verify_readiness_fails_when_gap_quality_violation_detected(
     settings,
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
     monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: settings)
@@ -303,7 +309,7 @@ def test_verify_readiness_fails_when_gap_quality_violation_detected(
             end="2025-01-08T21:00:00Z",
             symbols="",
             timeframes="1m",
-            output=Path("ignored.json"),
+            output=tmp_path / "ignored.json",
             require_report_artifacts=False,
             require_run_manifest=False,
             require_academic_validation=False,
@@ -313,6 +319,7 @@ def test_verify_readiness_fails_when_gap_quality_violation_detected(
 def test_verify_readiness_fails_when_run_manifest_required_and_missing(
     settings,
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(cli, "assert_python_runtime", lambda: None)
     monkeypatch.setattr(cli, "_load_runtime_settings", lambda _config: settings)
@@ -341,7 +348,7 @@ def test_verify_readiness_fails_when_run_manifest_required_and_missing(
             end="2025-01-02T21:00:00Z",
             symbols="",
             timeframes="1m",
-            output=Path("ignored.json"),
+            output=tmp_path / "ignored.json",
             require_report_artifacts=False,
             require_run_manifest=True,
             require_academic_validation=False,

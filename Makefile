@@ -64,8 +64,9 @@ ALPACA_BASIC_HISTORICAL_DELAY_MINUTES ?= 15## help: Alpaca Basic historical dela
 MAX_START ?= $(ALPACA_BASIC_HISTORICAL_START)
 MAX_END ?= $(shell powershell -NoProfile -Command "[Console]::Out.Write((Get-Date).ToUniversalTime().AddMinutes(-1.0 * [double]'$(ALPACA_BASIC_HISTORICAL_DELAY_MINUTES)').ToString('yyyy-MM-ddTHH:mm:ssZ'))")
 DISCOVER_START ?= $(ALPACA_BASIC_HISTORICAL_START)
-DISCOVER_RANGE_OUTPUT ?= artifacts/readiness/discovered_range_manifest.json## help: discover-range output JSON path.
-READINESS_ACCEPTANCE_OUTPUT ?= artifacts/readiness/readiness_acceptance.json## help: verify-readiness output JSON path.
+READINESS_ROOT ?= artifacts/readiness/$(CONFIG_PROFILE)## help: Profile-isolated readiness artifact root.
+DISCOVER_RANGE_OUTPUT ?= $(READINESS_ROOT)/discovered_range_manifest.json## help: discover-range output JSON path.
+READINESS_ACCEPTANCE_OUTPUT ?= $(READINESS_ROOT)/readiness_acceptance.json## help: verify-readiness output JSON path.
 READINESS_END ?= $(MAX_END)## help: Readiness/discover end timestamp.
 FULL_RANGE_START_COMPUTED := $(shell powershell -NoProfile -Command 'if (Test-Path "$(DISCOVER_RANGE_OUTPUT)") { $$payload = Get-Content -Path "$(DISCOVER_RANGE_OUTPUT)" -Raw | ConvertFrom-Json; $$value = $$payload.full_range_start; if ($$null -ne $$value) { if ($$value -is [datetime]) { $$value = $$value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }; [Console]::Out.Write([string]$$value) } }')
 FULL_RANGE_START ?= $(FULL_RANGE_START_COMPUTED)## help: Auto-loaded full_range_start from discover manifest.
@@ -79,7 +80,7 @@ WARMUP_DAYS ?= 120## help: Warmup days before analysis start for e2e.
 COMMON_ANALYSIS_START_COMPUTED := $(shell powershell -NoProfile -Command 'if ("$(FULL_RANGE_START)" -ne "") { $$start=[DateTimeOffset]::Parse("$(FULL_RANGE_START)"); $$days=[double]"$(WARMUP_DAYS)"; [Console]::Out.Write($$start.AddDays($$days).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")) }')
 COMMON_ANALYSIS_START ?= $(COMMON_ANALYSIS_START_COMPUTED)## help: Auto-computed analysis start for PROFILE=max_common from FULL_RANGE_START + WARMUP_DAYS.
 VERIFY_READINESS_ARGS ?=## help: Extra verify-readiness CLI args (for example --require-academic-validation).
-PAPER_HARDENING_INIT_OUTPUT ?= artifacts/readiness/paper_hardening_init.json## help: Part-2 hardening scaffold manifest output path.
+PAPER_HARDENING_INIT_OUTPUT ?= $(READINESS_ROOT)/paper_hardening_init.json## help: Part-2 hardening scaffold manifest output path.
 PART2_TEST_PATHS ?= tests/unit/test_cli_paper_hardening_init.py tests/integration/test_live_pipeline_mocked.py tests/unit/test_cli_readiness.py tests/integration/test_verify_readiness_academic_gate.py## help: Pytest paths for Part-2 component checks.
 RUN_LIVE_ARGS ?=## help: Extra run-live CLI args (for example --runtime-minutes 30 --lookback-hours 8).
 PHASE1_CLOSE_PROFILE ?= custom## help: e2e profile for phase1-close protocol.
@@ -320,4 +321,3 @@ _clean_all:
 clean: ## Remove artifacts, caches, and build outputs; use SCOPE=all to also remove .venv.
 	$(call require_choice,$(SCOPE),$(VALID_SCOPES),SCOPE)
 	$(MAKE) _clean_$(SCOPE)
-

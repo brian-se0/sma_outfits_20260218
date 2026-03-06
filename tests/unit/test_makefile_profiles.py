@@ -119,7 +119,20 @@ def test_makefile_removes_legacy_public_target_definitions() -> None:
 def test_makefile_preserves_phase2_and_phase1_dispatch_paths() -> None:
     makefile = Path("Makefile").read_text(encoding="utf-8")
 
+    assert "READINESS_ROOT ?= artifacts/readiness/$(CONFIG_PROFILE)" in makefile
+    assert (
+        "DISCOVER_RANGE_OUTPUT ?= $(READINESS_ROOT)/discovered_range_manifest.json"
+        in makefile
+    )
+    assert (
+        "READINESS_ACCEPTANCE_OUTPUT ?= $(READINESS_ROOT)/readiness_acceptance.json"
+        in makefile
+    )
     assert "PAPER_HARDENING_INIT_OUTPUT ?=" in makefile
+    assert (
+        "PAPER_HARDENING_INIT_OUTPUT ?= $(READINESS_ROOT)/paper_hardening_init.json"
+        in makefile
+    )
     assert "PART2_TEST_PATHS ?=" in makefile
     assert "tests/unit/test_cli_paper_hardening_init.py" in makefile
     assert "RUN_LIVE_ARGS ?=" in makefile
@@ -167,6 +180,18 @@ def test_makefile_help_examples_match_grouped_interface() -> None:
     ) in makefile
     assert "'make qa SUITE=dead-code'" in makefile
     assert "'make clean SCOPE=all'" in makefile
+
+
+def test_makefile_readiness_outputs_are_profile_isolated_by_default() -> None:
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+
+    assert (
+        "READINESS_ROOT ?= artifacts/readiness/$(CONFIG_PROFILE)"
+        "## help: Profile-isolated readiness artifact root."
+    ) in makefile
+    assert "$(DISCOVER_RANGE_OUTPUT)" in makefile
+    assert "$(READINESS_ACCEPTANCE_OUTPUT)" in makefile
+    assert "$(PAPER_HARDENING_INIT_OUTPUT)" in makefile
 
 
 def test_makefile_pytest_cache_preflight_is_enforced() -> None:

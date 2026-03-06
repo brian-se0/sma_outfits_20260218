@@ -9,8 +9,9 @@
 1. Default CLI/Make operational profile is `context`.
 2. `context` is the official operational lane; only `strict` and `context` are supported runtime profiles.
 3. `strict` remains the baseline comparison lane for research and robustness validation; `replication` is historical only.
-4. Phase 1 closure runs through `make run ACTION=phase1-close`.
-5. Part 2 preflight runs through `make run ACTION=phase2-preflight`, which sequences `make run ACTION=paper-hardening-init` and `make qa SUITE=part2`.
+4. Active runtime profiles write to isolated roots under `artifacts/svix211_106/<profile>`.
+5. Phase 1 closure runs through `make run ACTION=phase1-close`.
+6. Part 2 preflight runs through `make run ACTION=phase2-preflight`, which sequences `make run ACTION=paper-hardening-init` and `make qa SUITE=part2`.
 
 ## Data and Market Logic
 1. Session filtering defaults to regular U.S. hours (`09:30-16:00 America/New_York`) for non-crypto symbols.
@@ -36,7 +37,7 @@
 1. README rows that are malformed or semantically incomplete are preserved in `src/sma_outfits/config/outfits.yaml` with `source_ambiguous: true`.
 2. Ambiguous rows retain original integer sequences and raw source text.
 
-## Fallback Inventory (Preserved)
+## Operational Recovery and Idempotency (Preserved)
 1. `src/sma_outfits/live/runner.py` reconnect loop with exponential backoff is preserved unchanged.
-2. `src/sma_outfits/data/alpaca_clients.py` stale-feed detection and heartbeat timeout fallback handling are preserved unchanged.
+2. `src/sma_outfits/data/alpaca_clients.py` stale-feed detection and heartbeat-timeout recovery handling are preserved unchanged.
 3. Duplicate-bar idempotency semantics in live ingestion/persistence remain preserved.

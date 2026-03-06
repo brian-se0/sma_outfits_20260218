@@ -34,7 +34,7 @@ htmlcov/
 *.log
 logs/
 
-# Generated artifacts and local data
+# Generated artifacts, readiness manifests, and local data
 artifacts/
 /data/
 *.parquet
@@ -49,10 +49,6 @@ artifacts/
 # Generated media exports
 *.png
 *.pdf
-
-# Local coverage diagnostics
-ignored_coverage_details.csv
-ignored_coverage_quality.json
 
 # IDE / OS files
 .vscode/

@@ -13,7 +13,7 @@ def test_phase1_close_script_enumerates_only_strict_and_context() -> None:
     assert '"CONFIG_PROFILE=$profileName"' in script
     assert '"ACTION=verify-readiness"' in script
     assert (
-        '"artifacts/readiness/readiness_acceptance_${profileName}_${OutputLabel}_${pass}.json"'
+        '"artifacts/readiness/${profileName}/readiness_acceptance_${OutputLabel}_${pass}.json"'
         in script
     )
     assert 'command               = "make run ACTION=phase1-close"' in script

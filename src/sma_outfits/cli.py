@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import subprocess
 
 import pandas as pd
@@ -52,6 +53,26 @@ _DEFAULT_CONFIG_PATH = _CONTEXT_CONFIG_PATH
 
 def _load_runtime_settings(config: Path) -> Settings:
     return load_settings(config_path=config, env_path=Path(".env.local"))
+
+
+def _slugify_token(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+    return slug or "custom"
+
+
+def _config_profile_slug(config: Path | None) -> str:
+    if config is None:
+        return "context"
+    normalized = str(config).replace("\\", "/").lower()
+    if normalized == str(_STRICT_CONFIG_PATH).replace("\\", "/").lower():
+        return "strict"
+    if normalized == str(_CONTEXT_CONFIG_PATH).replace("\\", "/").lower():
+        return "context"
+    return _slugify_token(config.stem)
+
+
+def _default_readiness_output(config: Path | None, filename: str) -> Path:
+    return Path("artifacts/readiness") / _config_profile_slug(config) / filename
 
 
 def _load_discovery_runtime(
@@ -640,8 +661,8 @@ def discover_range(
     ),
     symbols: str = typer.Option("", "--symbols", help="CSV symbols override"),
     timeframes: str = typer.Option("", "--timeframes", help="CSV timeframes override"),
-    output: Path = typer.Option(
-        Path("artifacts/readiness/discovered_range_manifest.json"),
+    output: Path | None = typer.Option(
+        None,
         "--output",
         help="Output manifest path",
     ),
@@ -745,7 +766,11 @@ def discover_range(
         "timeframes": selected_timeframes,
         "records": sorted_records,
     }
-    manifest_path, hash_path, digest = _write_json_with_hash(payload, output)
+    resolved_output = output or _default_readiness_output(
+        config,
+        "discovered_range_manifest.json",
+    )
+    manifest_path, hash_path, digest = _write_json_with_hash(payload, resolved_output)
     typer.echo(json.dumps(payload, indent=2))
     typer.echo(f"manifest_path={manifest_path}")
     typer.echo(f"manifest_sha256={digest}")
@@ -1006,8 +1031,8 @@ def verify_readiness(
     end: str = typer.Option(..., "--end", help="UTC end timestamp"),
     symbols: str = typer.Option("", "--symbols", help="CSV symbols override"),
     timeframes: str = typer.Option("", "--timeframes", help="CSV timeframes override"),
-    output: Path = typer.Option(
-        Path("artifacts/readiness/readiness_acceptance.json"),
+    output: Path | None = typer.Option(
+        None,
         "--output",
         help="Output readiness acceptance manifest path",
     ),
@@ -1148,8 +1173,12 @@ def verify_readiness(
         "boundary_failures": sorted(boundary_failures),
         "gap_quality_failures": sorted(gap_quality_failures),
     }
+    resolved_output = output or _default_readiness_output(
+        config,
+        "readiness_acceptance.json",
+    )
     coverage_csv_path, coverage_quality_path = _write_coverage_artifacts(
-        output=output,
+        output=resolved_output,
         coverage_rows=coverage_rows,
         quality_payload=quality_payload,
     )
@@ -1308,7 +1337,7 @@ def verify_readiness(
         },
         "artifact_hashes": hashes,
     }
-    manifest_path, hash_path, digest = _write_json_with_hash(payload, output)
+    manifest_path, hash_path, digest = _write_json_with_hash(payload, resolved_output)
     typer.echo(json.dumps(payload, indent=2))
     typer.echo(f"readiness_manifest_path={manifest_path}")
     typer.echo(f"readiness_manifest_sha256={digest}")
@@ -1318,8 +1347,8 @@ def verify_readiness(
 @app.command("paper-hardening-init")
 def paper_hardening_init(
     config: Path = typer.Option(_DEFAULT_CONFIG_PATH, "--config"),
-    output: Path = typer.Option(
-        Path("artifacts/readiness/paper_hardening_init.json"),
+    output: Path | None = typer.Option(
+        None,
         "--output",
         help="Output Part-2 hardening scaffold manifest path",
     ),
@@ -1330,7 +1359,11 @@ def paper_hardening_init(
         settings=settings,
         config=config,
     )
-    manifest_path, hash_path, digest = _write_json_with_hash(payload, output)
+    resolved_output = output or _default_readiness_output(
+        config,
+        "paper_hardening_init.json",
+    )
+    manifest_path, hash_path, digest = _write_json_with_hash(payload, resolved_output)
     typer.echo(json.dumps(payload, indent=2))
     typer.echo(f"paper_hardening_init_path={manifest_path}")
     typer.echo(f"paper_hardening_init_sha256={digest}")

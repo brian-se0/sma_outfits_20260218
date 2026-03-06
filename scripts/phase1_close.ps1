@@ -80,7 +80,7 @@ foreach ($pass in $passes) {
             throw ("phase1-close failed: make run ACTION=e2e profile=" + $profileName + " pass=" + $pass)
         }
 
-        $manifestPath = "artifacts/readiness/readiness_acceptance_${profileName}_${OutputLabel}_${pass}.json"
+        $manifestPath = "artifacts/readiness/${profileName}/readiness_acceptance_${OutputLabel}_${pass}.json"
         $verifyArgs = @(
             "run",
             "ACTION=verify-readiness",
