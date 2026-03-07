@@ -16,7 +16,7 @@ The current runtime contract is:
 
 ## Current Ground Truth
 
-1. `make run ACTION=phase1-close` remains available as a reproducibility harness, now in a 2-profile recheck form.
+1. `make run ACTION=phase1-close` remains available as a reproducibility harness, now in a 2-profile recheck form that defaults to max-common available history per profile.
 2. `make run ACTION=phase2-preflight CONFIG_PROFILE=context` is the current entrypoint for Part 2 preflight work.
 3. `paper-hardening-init` still reports three blocking implementation gaps:
    - `missing_broker_order_submission`

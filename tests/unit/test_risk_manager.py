@@ -445,6 +445,108 @@ def test_penny_reference_break_closes_on_primary_symbol_boundary() -> None:
     assert events[0].price == 99.99
 
 
+def test_close_reference_break_ignores_intrabar_breach_until_bar_close_confirms() -> None:
+    route = _route(
+        route_id="spy_1m_close_refbreak",
+        risk_mode="close_reference_break",
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={route.id: route},
+        allow_same_bar_exit=True,
+    )
+    opened_ts = datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc)
+    route_context = RouteBarContext(
+        route=route,
+        key_sma=100.0,
+        micro_positive=False,
+        macro_positive=True,
+    )
+    position = manager.open_position(
+        signal=_signal("close-refbreak-primary", route.id, 100.0),
+        symbol="SPY",
+        ts=opened_ts,
+        route_context=route_context,
+    )
+
+    intrabar_only_events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=1), close=100.02, high=100.08, low=99.97),
+        proxy_prices={},
+        route_context=route_context,
+    )
+    assert intrabar_only_events == []
+    assert not position.closed
+
+    close_events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=2), close=99.98, high=100.01, low=99.95),
+        proxy_prices={},
+        route_context=route_context,
+    )
+    assert len(close_events) == 1
+    assert close_events[0].reason == "close_reference_break"
+    assert close_events[0].price == 99.98
+
+
+def test_close_reference_break_micro_override_holds_until_micro_turns_negative() -> None:
+    route = _route(
+        route_id="spy_1m_close_refbreak_override",
+        ignore_micro_override=True,
+        risk_mode="close_reference_break",
+    )
+    manager = RiskManager(
+        migrations={},
+        routes={route.id: route},
+        allow_same_bar_exit=True,
+    )
+    opened_ts = datetime(2025, 1, 2, 15, 0, tzinfo=timezone.utc)
+    open_context = RouteBarContext(
+        route=route,
+        key_sma=100.0,
+        micro_positive=False,
+        macro_positive=True,
+    )
+    position = manager.open_position(
+        signal=_signal("close-refbreak-override", route.id, 100.0),
+        symbol="SPY",
+        ts=opened_ts,
+        route_context=open_context,
+    )
+
+    positive_context = RouteBarContext(
+        route=route,
+        key_sma=100.0,
+        micro_positive=True,
+        macro_positive=True,
+    )
+    held_events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=1), close=99.98, high=100.0, low=99.9),
+        proxy_prices={},
+        route_context=positive_context,
+    )
+    assert held_events == []
+    assert not position.closed
+
+    negative_context = RouteBarContext(
+        route=route,
+        key_sma=100.0,
+        micro_positive=False,
+        macro_positive=True,
+    )
+    close_events = manager.evaluate_bar(
+        position,
+        _bar(opened_ts + timedelta(minutes=2), close=99.97, high=99.99, low=99.9),
+        proxy_prices={},
+        route_context=negative_context,
+    )
+    assert len(close_events) == 1
+    assert close_events[0].reason == "close_reference_break"
+    assert close_events[0].price == 99.97
+    assert position.closed
+
+
 def test_penny_reference_break_supports_cross_symbol_reference_cut() -> None:
     reference_route = RouteRule(
         id="qqq_1m_ref",

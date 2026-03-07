@@ -17,7 +17,7 @@ The supported runtime profile contract is `strict` and `context` only. `context`
 ## Dispatcher Flags
 
 - `MODE`: Allowed values are `install`, `venv`. `install` creates or repairs `.venv`, enforces Python `3.14.3`, and installs dependencies. `venv` stops after the environment/bootstrap step.
-- `ACTION`: Allowed values are `e2e`, `validate-config`, `discover-range`, `verify-readiness`, `backfill`, `replay`, `report`, `run-live`, `migrate-storage-layout`, `paper-hardening-init`, `phase2-preflight`, `preflight-storage`, `phase1-close`.
+- `ACTION`: Allowed values are `e2e`, `validate-config`, `discover-range`, `verify-readiness`, `backfill`, `replay`, `report`, `run-live`, `migrate-storage-layout`, `paper-hardening-init`, `phase2-preflight`, `preflight-storage`, `phase1-close`, `pair-batch`.
 - `SUITE`: Allowed values are `full`, `part2`, `dead-code`, `all`.
 - `SCOPE`: Allowed values are `default`, `all`.
 
@@ -37,7 +37,8 @@ The supported runtime profile contract is `strict` and `context` only. `context`
 | `paper-hardening-init` | Generate the Part 2 hardening scaffold manifest. |
 | `phase2-preflight` | Run `paper-hardening-init` and then `qa SUITE=part2`. |
 | `preflight-storage` | Check free disk space for heavier profiles without installing dependencies. |
-| `phase1-close` | Run the deterministic two-profile, two-pass closure harness. |
+| `phase1-close` | Run the deterministic two-profile, two-pass closure harness; default profile is `max_common` with auto-discovered common history per profile. |
+| `pair-batch` | Run a manifest-driven sequence of pair-specific `discover-range`, `e2e`, and `verify-readiness` workflows, continue past per-pair failures, and write a batch summary JSON. |
 
 ## Shared Domain Flags
 
@@ -54,7 +55,8 @@ The supported runtime profile contract is `strict` and `context` only. `context`
 - `WARMUP_DAYS`, `ANALYSIS_START`, `ANALYSIS_END`, `WARMUP_START`, `BACKFILL_START`, `BACKFILL_END`, `REPLAY_START`, `REPLAY_END`, `REPORT_RANGE`: e2e window controls.
 - `DISCOVER_START`, `READINESS_END`, `DISCOVER_RANGE_OUTPUT`, `READINESS_ACCEPTANCE_OUTPUT`, `VERIFY_READINESS_ARGS`: discovery and readiness controls.
 - `PAPER_HARDENING_INIT_OUTPUT`, `PART2_TEST_PATHS`, `RUN_LIVE_ARGS`: Part 2 and live-run controls.
-- `PHASE1_CLOSE_PROFILE`, `PHASE1_CLOSE_START`, `PHASE1_CLOSE_END`, `PHASE1_CLOSE_SYMBOLS`, `PHASE1_CLOSE_TIMEFRAMES`, `PHASE1_CLOSE_STAGES`, `PHASE1_CLOSE_OUTPUT`, `PHASE1_CLOSE_LABEL`, `PHASE1_CLOSE_ARCHIVE_ROOT`: Phase 1 closure controls.
+- `PHASE1_CLOSE_PROFILE`, `PHASE1_CLOSE_START`, `PHASE1_CLOSE_END`, `PHASE1_CLOSE_SYMBOLS`, `PHASE1_CLOSE_TIMEFRAMES`, `PHASE1_CLOSE_STAGES`, `PHASE1_CLOSE_OUTPUT`, `PHASE1_CLOSE_LABEL`, `PHASE1_CLOSE_ARCHIVE_ROOT`: Phase 1 closure controls. `PHASE1_CLOSE_PROFILE=max_common` is the default; `PHASE1_CLOSE_START/END` are only needed with `PHASE1_CLOSE_PROFILE=custom`.
+- `PAIR_BATCH_MANIFEST_PATH`, `PAIR_BATCH_OUTPUT`, `PAIR_BATCH_FAIL_ON_ANY`: Pair-batch manifest and summary controls.
 - `MIN_FREE_GB`: Free disk threshold enforced by `ACTION=preflight-storage` and the `e2e` workflow.
 
 ## Common Examples
@@ -67,6 +69,8 @@ make run
 make run ACTION=e2e CONFIG_PROFILE=strict PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all
 make run ACTION=verify-readiness CONFIG_PROFILE=context START=$env:FULL_RANGE_START END=$env:READINESS_END UNIVERSE=all_stocks TIMEFRAME_SET=all
 make run ACTION=phase1-close
+make run ACTION=pair-batch CONFIG_PROFILE=context
+make run ACTION=phase1-close PHASE1_CLOSE_PROFILE=custom PHASE1_CLOSE_START=2022-03-31T15:30:00Z PHASE1_CLOSE_END=2026-02-28T23:16:28Z
 make run ACTION=phase2-preflight CONFIG_PROFILE=context
 make run ACTION=run-live CONFIG_PROFILE=context RUN_LIVE_ARGS='--runtime-minutes 30 --lookback-hours 8'
 make qa
@@ -97,6 +101,7 @@ make clean SCOPE=all
 | `make preflight-storage` | `make run ACTION=preflight-storage` |
 | `make e2e` | `make run ACTION=e2e` |
 | `make phase1-close` | `make run ACTION=phase1-close` |
+| `make pair-batch` | `make run ACTION=pair-batch` |
 | `make clean-all` | `make clean SCOPE=all` |
 
 ## Notes on Defaults and Hard-Fail Validation

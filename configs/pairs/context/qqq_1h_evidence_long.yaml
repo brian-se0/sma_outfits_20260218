@@ -1,0 +1,131 @@
+alpaca:
+  base_url: https://paper-api.alpaca.markets
+  data_url: https://data.alpaca.markets
+  data_feed: iex
+  adjustment: raw
+  asof: "2025-01-01"
+  crypto_loc: us
+
+universe:
+  symbols:
+    - QQQ
+    - VIXY
+  proxy_map:
+    IXIC: QQQ
+    NDX: QQQ
+    VIX: VIXY
+  symbol_markets:
+    QQQ: stocks
+    VIXY: stocks
+
+sessions:
+  regular_only: true
+  extended_enabled: false
+  timezone: America/New_York
+
+timeframes:
+  live: [1m, 2m, 3m, 5m, 10m, 15m, 20m, 30m, 1h, 2h, 4h, 1D]
+  derived: [1W, 1M, 1Q]
+  anchors:
+    1W: W-FRI
+    1M: ME
+    1Q: QE
+
+signal:
+  tolerance: 0.01
+
+strategy:
+  price_basis: ohlc4
+  trigger_mode: close_touch_or_cross
+  strict_routing: true
+  allow_same_bar_exit: false
+  ambiguity_policy: fail
+  routes:
+    # Evidence-constrained proxy: long-only, close-based MA512 cut, no unstated volume filter.
+    - id: qqq_1h_author
+      symbol: QQQ
+      timeframe: 1h
+      outfit_id: base2_nvda
+      key_period: 512
+      side: LONG
+      signal_type: optimized_buy
+      micro_periods: [16, 32, 64, 128, 256]
+      ignore_close_below_key_when_micro_positive: true
+      macro_gate: nas
+      risk_mode: close_reference_break
+      stop_offset: 0.01
+      dynamic_reference_migration: true
+      confluence:
+        enabled: false
+
+risk:
+  long_break: 0.01
+  short_break: 0.01
+  partial_take_r: 1.0
+  final_take_r: 3.0
+  timeout_bars: 120
+  risk_dollar_per_trade: 1.0
+  migrations: {}
+
+archive:
+  enabled: true
+  root: artifacts/pairs/qqq_1h_evidence_long/context
+
+ingest:
+  empty_source_policy: fail
+
+live:
+  runtime_minutes: null
+  warmup_minutes: 480
+  reconnect_max_attempts: 8
+  reconnect_base_delay_seconds: 1.0
+  reconnect_max_delay_seconds: 30.0
+  stale_feed_seconds: 120
+  heartbeat_interval_seconds: 20
+  heartbeat_timeout_seconds: 10
+  state_persistence_enabled: true
+  state_flush_interval_seconds: 5.0
+  reconciliation_enabled: true
+  reconciliation_interval_seconds: 60.0
+  data_gap_threshold_seconds: 90
+  symbol_stale_threshold_seconds: 180
+
+storage_root: artifacts/pairs/qqq_1h_evidence_long/context/storage
+events_root: artifacts/pairs/qqq_1h_evidence_long/context/events
+outfits_path: src/sma_outfits/config/outfits.yaml
+
+validation:
+  scope_symbols: [QQQ]
+  wfo:
+    train_months: 23
+    test_months: 12
+    step_months: 6
+    min_folds: 3
+    min_closed_trades_per_fold: 14
+  thresholds:
+    oos_sharpe_min: 1.5
+    oos_calmar_min: 2.0
+    bootstrap_pvalue_max: 0.06
+    fdr_qvalue_max: 0.05
+    author_alignment_score_min: 0.7
+  bootstrap:
+    method: stationary_block
+    samples: 10000
+    alpha: 0.05
+  multiple_testing:
+    method: fdr_bh
+  regime:
+    proxy_symbol: VIXY
+    require_positive_mean_in_each: true
+  random_strategy_mc_samples: 10000
+  seed: 42
+  author_alignment_rules_path: src/sma_outfits/reporting/citations/author_alignment_rules.yaml
+
+execution_costs:
+  slippage_bps_scenarios: [2.0, 3.5, 5.0]
+  commission_bps_scenarios: [0.5, 0.75, 1.0]
+  latency_bars_scenarios: [0, 1, 1]
+  partial_fill_round_lot: true
+
+citations:
+  pack_path: src/sma_outfits/reporting/citations/academic_validation.yaml

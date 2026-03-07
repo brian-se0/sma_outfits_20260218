@@ -473,6 +473,7 @@ class RouteRule(BaseModel):
     risk_mode: Literal[
         "singular_penny_only",
         "penny_reference_break",
+        "close_reference_break",
         "atr_dynamic_stop",
     ] = "singular_penny_only"
     stop_offset: float = 0.01
@@ -1027,7 +1028,11 @@ class Settings(BaseModel):
                     "strategy.ambiguity_policy=fail".format(index, route.outfit_id)
                 )
 
-        close_only_modes = {"singular_penny_only", "penny_reference_break"}
+        close_only_modes = {
+            "singular_penny_only",
+            "penny_reference_break",
+            "close_reference_break",
+        }
         if routes and all(route.risk_mode in close_only_modes for route in routes):
             non_default_knobs: list[str] = []
             if self.risk.partial_take_r != 1.0:
@@ -1045,7 +1050,8 @@ class Settings(BaseModel):
             if non_default_knobs:
                 raise ValueError(
                     "risk partial/final/timeout knobs are inactive for close-only routes "
-                    "(singular_penny_only, penny_reference_break); reset to defaults. "
+                    "(singular_penny_only, penny_reference_break, close_reference_break); "
+                    "reset to defaults. "
                     "Configured non-default values: "
                     + ", ".join(non_default_knobs)
                 )

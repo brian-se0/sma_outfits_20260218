@@ -74,7 +74,8 @@ def test_makefile_exposes_only_streamlined_public_targets() -> None:
     assert (
         "VALID_ACTIONS := e2e validate-config discover-range verify-readiness "
         "backfill replay report run-live migrate-storage-layout "
-        "paper-hardening-init phase2-preflight preflight-storage phase1-close"
+        "paper-hardening-init phase2-preflight preflight-storage phase1-close "
+        "pair-batch"
     ) in makefile
     assert "VALID_SUITES := full part2 dead-code all" in makefile
     assert "VALID_SCOPES := default all" in makefile
@@ -136,6 +137,9 @@ def test_makefile_preserves_phase2_and_phase1_dispatch_paths() -> None:
     assert "PART2_TEST_PATHS ?=" in makefile
     assert "tests/unit/test_cli_paper_hardening_init.py" in makefile
     assert "RUN_LIVE_ARGS ?=" in makefile
+    assert "PAIR_BATCH_MANIFEST_PATH ?=" in makefile
+    assert "PAIR_BATCH_OUTPUT ?=" in makefile
+    assert "PAIR_BATCH_FAIL_ON_ANY ?=" in makefile
     assert "_run_paper-hardening-init:" in makefile
     assert "_qa_part2:" in makefile
     assert "_run_phase2-preflight:" in makefile
@@ -147,6 +151,29 @@ def test_makefile_preserves_phase2_and_phase1_dispatch_paths() -> None:
     assert "powershell -NoProfile -File scripts/phase1_close.ps1" in makefile
     assert "-MakeCommand \"$(MAKE)\"" in makefile
     assert "-ArchiveRoot \"$(PHASE1_CLOSE_ARCHIVE_ROOT)\"" in makefile
+    assert "_run_pair-batch:" in makefile
+    assert "powershell -NoProfile -File scripts/pair_batch.ps1" in makefile
+    assert "-ManifestPath \"$(PAIR_BATCH_MANIFEST_PATH)\"" in makefile
+    assert "-OutputPath \"$(PAIR_BATCH_OUTPUT)\"" in makefile
+    assert "-FailOnAny \"$(PAIR_BATCH_FAIL_ON_ANY)\"" in makefile
+
+
+def test_makefile_phase1_close_defaults_to_max_common_and_custom_window_overrides() -> None:
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+
+    assert (
+        "PHASE1_CLOSE_PROFILE ?= max_common"
+        "## help: e2e profile for phase1-close protocol "
+        "(max_common default; custom requires PHASE1_CLOSE_START/END)."
+    ) in makefile
+    assert (
+        "PHASE1_CLOSE_START ?=## help: Optional phase1-close start timestamp "
+        "when PHASE1_CLOSE_PROFILE=custom."
+    ) in makefile
+    assert (
+        "PHASE1_CLOSE_END ?=## help: Optional phase1-close end timestamp "
+        "when PHASE1_CLOSE_PROFILE=custom."
+    ) in makefile
 
 
 def test_makefile_dispatch_rules_match_bootstrap_and_qa_contracts() -> None:
@@ -174,6 +201,7 @@ def test_makefile_help_examples_match_grouped_interface() -> None:
         "START=$$env:FULL_RANGE_START END=$(READINESS_END) "
         "UNIVERSE=all_stocks TIMEFRAME_SET=all"
     ) in makefile
+    assert "'make run ACTION=pair-batch CONFIG_PROFILE=context'" in makefile
     assert (
         "make run ACTION=run-live CONFIG_PROFILE=context "
         "RUN_LIVE_ARGS=''--runtime-minutes 30 --lookback-hours 8''"

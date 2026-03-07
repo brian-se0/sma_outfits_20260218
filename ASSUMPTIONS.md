@@ -10,7 +10,7 @@
 2. `context` is the official operational lane; only `strict` and `context` are supported runtime profiles.
 3. `strict` remains the baseline comparison lane for research and robustness validation; `replication` is historical only.
 4. Active runtime profiles write to isolated roots under `artifacts/svix211_106/<profile>`.
-5. Phase 1 closure runs through `make run ACTION=phase1-close`.
+5. Phase 1 closure runs through `make run ACTION=phase1-close`, which defaults to `PHASE1_CLOSE_PROFILE=max_common` and auto-discovers the per-profile common historical start.
 6. Part 2 preflight runs through `make run ACTION=phase2-preflight`, which sequences `make run ACTION=paper-hardening-init` and `make qa SUITE=part2`.
 
 ## Data and Market Logic

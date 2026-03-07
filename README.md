@@ -19,6 +19,7 @@ Deterministic, fail-fast SMA-outfits research stack built around Alpaca free dat
 - Active profiles write to isolated artifact/state roots under `artifacts/svix211_106/<profile>`.
 - Live execution currently supports state persistence, duplicate-bar protection, stale-feed recovery, and optional reconciliation.
 - Live execution does not yet submit broker orders or process fill callbacks.
+- `make run ACTION=phase1-close` defaults to a max-common historical recheck and auto-discovers the per-profile common start before each pass.
 
 ## Common Workflows
 

@@ -4,6 +4,16 @@ outfits:
     periods: [10, 50, 200]
     description: "S&P"
     source_ambiguous: false
+  - id: spy_29_58_116_232_464_928
+    source_configuration: "29/58/116/232/464/928"
+    periods: [29, 58, 116, 232, 464, 928]
+    description: "SPY"
+    source_ambiguous: false
+  - id: base_10_50_iwm
+    source_configuration: "10/50"
+    periods: [10, 50]
+    description: "IWM"
+    source_ambiguous: false
   - id: nas_system
     source_configuration: "20/100/250"
     periods: [20, 100, 250]
@@ -39,9 +49,19 @@ outfits:
     periods: [16, 32, 64, 128, 256, 512]
     description: "Base 2/NVDA"
     source_ambiguous: false
+  - id: ma50_nvda
+    source_configuration: "50"
+    periods: [50]
+    description: "NVDA"
+    source_ambiguous: false
   - id: tsla_420
     source_configuration: "27/53/105/210/420/840 (420)"
     periods: [27, 53, 105, 210, 420, 840]
+    description: "TSLA"
+    source_ambiguous: false
+  - id: tsla_33_66_131_262_626_919
+    source_configuration: "33/66/131/262/626/919"
+    periods: [33, 66, 131, 262, 626, 919]
     description: "TSLA"
     source_ambiguous: false
   - id: time_365
@@ -118,6 +138,11 @@ outfits:
     source_configuration: "26/52/116/211/422/844 (211)"
     periods: [26, 52, 116, 211, 422, 844]
     description: "SVIX (211 key, 116 variant)"
+    source_ambiguous: false
+  - id: svix_17_33_66_132_264_528
+    source_configuration: "17/33/66/132/264/528"
+    periods: [17, 33, 66, 132, 264, 528]
+    description: "SVIX"
     source_ambiguous: false
   - id: turkiye_president_12
     source_configuration: "24/48/96/192/384/768 (12)"

@@ -107,7 +107,7 @@ class RiskManager:
                 "Computed position qty must be > 0 "
                 f"(signal_id={signal.id}, route_id={signal.route_id})"
             )
-        if route.risk_mode == "penny_reference_break":
+        if route.risk_mode in {"penny_reference_break", "close_reference_break"}:
             reference_break_rules = self._build_reference_break_rules(
                 signal=signal,
                 route=route,
@@ -140,7 +140,11 @@ class RiskManager:
         route_history: pd.DataFrame | None = None,
     ) -> SignalEvent:
         route = self._require_route(signal.route_id)
-        if route.risk_mode in {"singular_penny_only", "penny_reference_break"}:
+        if route.risk_mode in {
+            "singular_penny_only",
+            "penny_reference_break",
+            "close_reference_break",
+        }:
             stop = (
                 signal.entry - route.stop_offset
                 if signal.side == "LONG"
@@ -249,6 +253,15 @@ class RiskManager:
                 proxy_prices=proxy_prices,
                 cross_context_lookup=cross_context_lookup,
             )
+        if route.risk_mode == "close_reference_break":
+            return self._evaluate_close_reference_break(
+                position=position,
+                bar=bar,
+                route=route,
+                route_context=route_context,
+                proxy_prices=proxy_prices,
+                cross_context_lookup=cross_context_lookup,
+            )
         if route.risk_mode == "atr_dynamic_stop":
             return self._evaluate_atr_dynamic_stop(
                 position=position,
@@ -297,9 +310,50 @@ class RiskManager:
         proxy_prices: dict[str, float],
         cross_context_lookup: Callable[[str, datetime], RouteBarContext | None] | None,
     ) -> list[PositionEvent]:
+        return self._evaluate_reference_break(
+            position=position,
+            bar=bar,
+            route=route,
+            route_context=route_context,
+            proxy_prices=proxy_prices,
+            cross_context_lookup=cross_context_lookup,
+            close_based_primary_break=False,
+        )
+
+    def _evaluate_close_reference_break(
+        self,
+        *,
+        position: ManagedPosition,
+        bar: BarEvent,
+        route: RouteRule,
+        route_context: RouteBarContext | None,
+        proxy_prices: dict[str, float],
+        cross_context_lookup: Callable[[str, datetime], RouteBarContext | None] | None,
+    ) -> list[PositionEvent]:
+        return self._evaluate_reference_break(
+            position=position,
+            bar=bar,
+            route=route,
+            route_context=route_context,
+            proxy_prices=proxy_prices,
+            cross_context_lookup=cross_context_lookup,
+            close_based_primary_break=True,
+        )
+
+    def _evaluate_reference_break(
+        self,
+        *,
+        position: ManagedPosition,
+        bar: BarEvent,
+        route: RouteRule,
+        route_context: RouteBarContext | None,
+        proxy_prices: dict[str, float],
+        cross_context_lookup: Callable[[str, datetime], RouteBarContext | None] | None,
+        close_based_primary_break: bool,
+    ) -> list[PositionEvent]:
         if not position.reference_break_rules:
             raise RuntimeError(
-                "penny_reference_break position has no reference_break_rules "
+                "reference_break route has no reference_break_rules "
                 f"(signal_id={position.signal_id}, route_id={position.route_id})"
             )
         has_cross_reference_rules = self._has_cross_reference_rules(position)
@@ -333,6 +387,7 @@ class RiskManager:
                 position=position,
                 bar=bar,
                 proxy_prices=proxy_prices,
+                close_based_primary_break=close_based_primary_break,
             ):
                 continue
 
@@ -345,7 +400,11 @@ class RiskManager:
                 continue
 
             reason = (
-                "penny_reference_break"
+                (
+                    "close_reference_break"
+                    if close_based_primary_break
+                    else "penny_reference_break"
+                )
                 if reference_break.symbol == position.symbol
                 else "cross_symbol_reference_break"
             )
@@ -354,6 +413,7 @@ class RiskManager:
                 position=position,
                 bar=bar,
                 proxy_prices=proxy_prices,
+                close_based_primary_break=close_based_primary_break,
             )
             return [
                 self._close_event(
@@ -430,6 +490,7 @@ class RiskManager:
         position: ManagedPosition,
         bar: BarEvent,
         proxy_prices: dict[str, float],
+        close_based_primary_break: bool,
     ) -> bool:
         level = float(reference_break.level)
         threshold = float(reference_break.threshold)
@@ -445,6 +506,10 @@ class RiskManager:
         )
 
         if reference_break.symbol == position.symbol:
+            if close_based_primary_break:
+                if reference_break.mode == "below":
+                    return bar.close <= boundary
+                return bar.close >= boundary
             if reference_break.mode == "below":
                 return bar.low <= boundary
             return bar.high >= boundary
@@ -466,8 +531,11 @@ class RiskManager:
         position: ManagedPosition,
         bar: BarEvent,
         proxy_prices: dict[str, float],
+        close_based_primary_break: bool,
     ) -> float:
         if reference_break.symbol == position.symbol:
+            if close_based_primary_break:
+                return round(float(bar.close), 6)
             boundary = (
                 float(reference_break.level) - float(reference_break.threshold)
                 if reference_break.mode == "below"
@@ -665,7 +733,7 @@ class RiskManager:
     ) -> tuple[ReferenceBreakRule, ...]:
         if route_context is None:
             raise RuntimeError(
-                "penny_reference_break requires explicit route_context at position open "
+                "reference_break risk mode requires explicit route_context at position open "
                 f"(route_id={route.id}, signal_id={signal.id})"
             )
         if route_context.route.id != route.id:
@@ -677,7 +745,8 @@ class RiskManager:
         threshold = round(float(route.stop_offset), 6)
         if threshold <= 0:
             raise RuntimeError(
-                f"route.stop_offset must be > 0 for penny_reference_break (route_id={route.id})"
+                "route.stop_offset must be > 0 for reference_break risk modes "
+                f"(route_id={route.id})"
             )
         mode: Literal["below", "above"] = "below" if signal.side == "LONG" else "above"
 
@@ -695,7 +764,7 @@ class RiskManager:
         if cross_rules:
             if cross_context_lookup is None:
                 raise RuntimeError(
-                    "penny_reference_break requires cross_context_lookup for cross-symbol "
+                    "reference_break risk mode requires cross_context_lookup for cross-symbol "
                     f"reference routes (route_id={route.id})"
                 )
             for cross_rule in cross_rules:
@@ -708,7 +777,7 @@ class RiskManager:
                         else opened_at_ts.tz_localize("UTC").isoformat()
                     )
                     raise RuntimeError(
-                        "Missing cross-symbol context while opening penny_reference_break "
+                        "Missing cross-symbol context while opening reference_break "
                         "position: route_id={} reference_route_id={} opened_at={}".format(
                             route.id,
                             cross_rule.reference_route_id,

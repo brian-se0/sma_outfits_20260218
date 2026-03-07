@@ -28,7 +28,7 @@ endif
 #   make run ACTION=e2e PROFILE=month WARMUP_DAYS=150
 #   make run ACTION=e2e PROFILE=month STAGES=backfill,replay,report
 MODE ?= install## help: Setup mode selector (install|venv).
-ACTION ?= e2e## help: Run action selector (e2e|validate-config|discover-range|verify-readiness|backfill|replay|report|run-live|migrate-storage-layout|paper-hardening-init|phase2-preflight|preflight-storage|phase1-close).
+ACTION ?= e2e## help: Run action selector (e2e|validate-config|discover-range|verify-readiness|backfill|replay|report|run-live|migrate-storage-layout|paper-hardening-init|phase2-preflight|preflight-storage|phase1-close|pair-batch).
 SUITE ?= full## help: QA suite selector (full|part2|dead-code|all).
 SCOPE ?= default## help: Clean scope selector (default|all).
 PROFILE ?= smoke## help: Range profile (smoke|day|week|month|max|max_common|custom).
@@ -83,15 +83,18 @@ VERIFY_READINESS_ARGS ?=## help: Extra verify-readiness CLI args (for example --
 PAPER_HARDENING_INIT_OUTPUT ?= $(READINESS_ROOT)/paper_hardening_init.json## help: Part-2 hardening scaffold manifest output path.
 PART2_TEST_PATHS ?= tests/unit/test_cli_paper_hardening_init.py tests/integration/test_live_pipeline_mocked.py tests/unit/test_cli_readiness.py tests/integration/test_verify_readiness_academic_gate.py## help: Pytest paths for Part-2 component checks.
 RUN_LIVE_ARGS ?=## help: Extra run-live CLI args (for example --runtime-minutes 30 --lookback-hours 8).
-PHASE1_CLOSE_PROFILE ?= custom## help: e2e profile for phase1-close protocol.
-PHASE1_CLOSE_START ?= 2022-03-31T15:30:00Z## help: Phase-1 closure protocol start timestamp.
-PHASE1_CLOSE_END ?= 2026-02-28T23:16:28Z## help: Phase-1 closure protocol end timestamp.
+PHASE1_CLOSE_PROFILE ?= max_common## help: e2e profile for phase1-close protocol (max_common default; custom requires PHASE1_CLOSE_START/END).
+PHASE1_CLOSE_START ?=## help: Optional phase1-close start timestamp when PHASE1_CLOSE_PROFILE=custom.
+PHASE1_CLOSE_END ?=## help: Optional phase1-close end timestamp when PHASE1_CLOSE_PROFILE=custom.
 PHASE1_CLOSE_SYMBOLS ?= QQQ,RWM,SVIX,SQQQ,TQQQ,IWM,XLF,SOXL,SPY,UPRO,VIXY## help: Phase-1 closure protocol symbols CSV.
 PHASE1_CLOSE_TIMEFRAMES ?= 30m,1h## help: Phase-1 closure protocol timeframes CSV.
 PHASE1_CLOSE_STAGES ?= validate-config,backfill,replay,report## help: e2e stages for phase1-close protocol.
 PHASE1_CLOSE_OUTPUT ?= artifacts/readiness/phase1_recheck_acceptance.json## help: phase1-close summary JSON path.
 PHASE1_CLOSE_LABEL ?= phase1recheck## help: Manifest label suffix for phase1-close outputs.
 PHASE1_CLOSE_ARCHIVE_ROOT ?= audit/phase1_rechecks## help: Non-cleaned root path for per-pass phase1-close manifests.
+PAIR_BATCH_MANIFEST_PATH ?= configs/pairs/context/batch_manifest.json## help: Pair-batch manifest JSON path.
+PAIR_BATCH_OUTPUT ?= artifacts/readiness/pair_batch_summary.json## help: Pair-batch summary JSON path.
+PAIR_BATCH_FAIL_ON_ANY ?= false## help: Whether pair-batch returns nonzero if any pair fails (true|false).
 
 ifeq ($(PROFILE),smoke)
 PROFILE_START := 2025-01-02T14:30:00Z
@@ -220,14 +223,14 @@ endef
 .PHONY: help setup run qa clean
 
 VALID_MODES := install venv
-VALID_ACTIONS := e2e validate-config discover-range verify-readiness backfill replay report run-live migrate-storage-layout paper-hardening-init phase2-preflight preflight-storage phase1-close
+VALID_ACTIONS := e2e validate-config discover-range verify-readiness backfill replay report run-live migrate-storage-layout paper-hardening-init phase2-preflight preflight-storage phase1-close pair-batch
 VALID_SUITES := full part2 dead-code all
 VALID_SCOPES := default all
 format_allowed = $(subst $(space),$(comma) ,$(strip $(1)))
 require_choice = $(if $(filter $(1),$(2)),,$(error Unsupported $(3)='$(1)'. Use: $(call format_allowed,$(2))))
 
 help: ## Print the streamlined target interface, dispatcher flags, and examples.
-	powershell -NoProfile -Command "$$lines = Get-Content -Path 'Makefile'; $$targets = @(); $$vars = @(); foreach ($$line in $$lines) { if ($$line -match '^(?<target>[A-Za-z0-9_.-]+):(?:[^#]|#(?!#))*## (?<desc>.+)$$') { if ($$matches.target -notlike '_*') { $$targets += [PSCustomObject]@{ key = $$matches.target; desc = $$matches.desc } } }; if ($$line -match '^(?<var>[A-Z][A-Z0-9_]*)\s*(?:\?|:|\+)?=\s*.*##\s*help:\s*(?<desc>.+)$$') { $$vars += [PSCustomObject]@{ key = $$matches.var; desc = $$matches.desc } } }; Write-Output 'Targets:'; foreach ($$entry in $$targets) { Write-Output ('  make ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Common variables:'; foreach ($$entry in $$vars) { Write-Output ('  ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Examples:'; $$examples = @('make run','make setup MODE=venv','make run ACTION=e2e CONFIG_PROFILE=strict PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all','make run ACTION=verify-readiness CONFIG_PROFILE=context START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all','make run ACTION=phase1-close','make run ACTION=phase2-preflight CONFIG_PROFILE=context','make run ACTION=run-live CONFIG_PROFILE=context RUN_LIVE_ARGS=''--runtime-minutes 30 --lookback-hours 8''','make qa SUITE=dead-code','make clean SCOPE=all'); foreach ($$e in $$examples) { Write-Output ('  ' + $$e) }"
+	powershell -NoProfile -Command "$$lines = Get-Content -Path 'Makefile'; $$targets = @(); $$vars = @(); foreach ($$line in $$lines) { if ($$line -match '^(?<target>[A-Za-z0-9_.-]+):(?:[^#]|#(?!#))*## (?<desc>.+)$$') { if ($$matches.target -notlike '_*') { $$targets += [PSCustomObject]@{ key = $$matches.target; desc = $$matches.desc } } }; if ($$line -match '^(?<var>[A-Z][A-Z0-9_]*)\s*(?:\?|:|\+)?=\s*.*##\s*help:\s*(?<desc>.+)$$') { $$vars += [PSCustomObject]@{ key = $$matches.var; desc = $$matches.desc } } }; Write-Output 'Targets:'; foreach ($$entry in $$targets) { Write-Output ('  make ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Common variables:'; foreach ($$entry in $$vars) { Write-Output ('  ' + $$entry.key + ' - ' + $$entry.desc) }; Write-Output ''; Write-Output 'Examples:'; $$examples = @('make run','make setup MODE=venv','make run ACTION=e2e CONFIG_PROFILE=strict PROFILE=max_common UNIVERSE=all TIMEFRAME_SET=all','make run ACTION=verify-readiness CONFIG_PROFILE=context START=$$env:FULL_RANGE_START END=$(READINESS_END) UNIVERSE=all_stocks TIMEFRAME_SET=all','make run ACTION=phase1-close','make run ACTION=pair-batch CONFIG_PROFILE=context','make run ACTION=phase2-preflight CONFIG_PROFILE=context','make run ACTION=run-live CONFIG_PROFILE=context RUN_LIVE_ARGS=''--runtime-minutes 30 --lookback-hours 8''','make qa SUITE=dead-code','make clean SCOPE=all'); foreach ($$e in $$examples) { Write-Output ('  ' + $$e) }"
 
 _setup_venv:
 	powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '.tmp' | Out-Null; $$env:TEMP='$(CURDIR)\\.tmp'; $$env:TMP='$(CURDIR)\\.tmp'; if (!(Test-Path '$(PYTHON)')) { py -3.14 -m venv $(VENV) }; if (!(Test-Path '$(VENV)\\Scripts\\pip.exe')) { & '$(PYTHON)' -m ensurepip --upgrade --default-pip }"
@@ -300,6 +303,9 @@ _run_e2e:
 
 _run_phase1-close:
 	powershell -NoProfile -File scripts/phase1_close.ps1 -MakeCommand "$(MAKE)" -Profile "$(PHASE1_CLOSE_PROFILE)" -Start "$(PHASE1_CLOSE_START)" -End "$(PHASE1_CLOSE_END)" -Symbols "$(PHASE1_CLOSE_SYMBOLS)" -Timeframes "$(PHASE1_CLOSE_TIMEFRAMES)" -Stages "$(PHASE1_CLOSE_STAGES)" -VerifyReadinessArgs "$(VERIFY_READINESS_ARGS)" -OutputPath "$(PHASE1_CLOSE_OUTPUT)" -OutputLabel "$(PHASE1_CLOSE_LABEL)" -ArchiveRoot "$(PHASE1_CLOSE_ARCHIVE_ROOT)"
+
+_run_pair-batch:
+	powershell -NoProfile -File scripts/pair_batch.ps1 -MakeCommand "$(MAKE)" -ManifestPath "$(PAIR_BATCH_MANIFEST_PATH)" -OutputPath "$(PAIR_BATCH_OUTPUT)" -FailOnAny "$(PAIR_BATCH_FAIL_ON_ANY)" -DefaultConfigProfile "$(CONFIG_PROFILE)" -DefaultVerifyReadinessArgs "$(VERIFY_READINESS_ARGS)"
 
 run: ## Run the primary workflow selected by ACTION.
 	$(call require_choice,$(ACTION),$(VALID_ACTIONS),ACTION)

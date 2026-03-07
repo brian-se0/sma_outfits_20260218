@@ -1,0 +1,24 @@
+{
+  "pairs": [
+    {
+      "id": "qqq_1h",
+      "enabled": true,
+      "config_profile": "context",
+      "config_path": "configs/pairs/context/qqq_1h.yaml",
+      "archive_root": "artifacts/pairs/qqq_1h/context",
+      "readiness_root": "artifacts/readiness/pairs/qqq_1h",
+      "discover_symbols": "QQQ,VIXY",
+      "discover_timeframes": "1h",
+      "e2e_profile": "max_common",
+      "e2e_symbols": "QQQ,VIXY",
+      "e2e_timeframes": "1h",
+      "backfill_symbols": "QQQ,VIXY",
+      "backfill_timeframes": "1h",
+      "replay_symbols": "QQQ",
+      "replay_timeframes": "1h",
+      "verify_symbols": "QQQ",
+      "verify_timeframes": "1h",
+      "verify_readiness_args": "--require-academic-validation"
+    }
+  ]
+}

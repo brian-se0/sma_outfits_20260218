@@ -8,10 +8,17 @@ def test_phase1_close_script_enumerates_only_strict_and_context() -> None:
 
     assert '$profiles = @("strict", "context")' in script
     assert '$passes = @("iso1", "iso2")' in script
+    assert '[string]$Start = ""' in script
+    assert '[string]$End = ""' in script
+    assert 'if ($Profile -eq "custom")' in script
+    assert '"ACTION=discover-range"' in script
     assert '"run"' in script
     assert '"ACTION=e2e"' in script
     assert '"CONFIG_PROFILE=$profileName"' in script
     assert '"ACTION=verify-readiness"' in script
+    assert 'phase1-close failed: make run ACTION=discover-range' in script
+    assert 'resolved_start' in script
+    assert 'resolved_end' in script
     assert (
         '"artifacts/readiness/${profileName}/readiness_acceptance_${OutputLabel}_${pass}.json"'
         in script

@@ -3,10 +3,10 @@ param(
     [string]$MakeCommand,
     [Parameter(Mandatory = $true)]
     [string]$Profile,
-    [Parameter(Mandatory = $true)]
-    [string]$Start,
-    [Parameter(Mandatory = $true)]
-    [string]$End,
+    [Parameter()]
+    [string]$Start = "",
+    [Parameter()]
+    [string]$End = "",
     [Parameter(Mandatory = $true)]
     [string]$Symbols,
     [Parameter(Mandatory = $true)]
@@ -24,6 +24,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($Profile -eq "custom") {
+    if ([string]::IsNullOrWhiteSpace($Start) -or [string]::IsNullOrWhiteSpace($End)) {
+        throw "phase1-close failed: PHASE1_CLOSE_PROFILE=custom requires explicit Start and End"
+    }
+}
 
 function Get-Sha256Hex {
     param(
@@ -64,17 +70,35 @@ foreach ($pass in $passes) {
             throw ("phase1-close failed: make clean profile=" + $profileName + " pass=" + $pass)
         }
 
+        if ($Profile -eq "max_common") {
+            $discoverArgs = @(
+                "run",
+                "ACTION=discover-range",
+                "CONFIG_PROFILE=$profileName",
+                "SYMBOLS=$Symbols",
+                "TIMEFRAMES=$Timeframes"
+            )
+            & $MakeCommand @discoverArgs
+            if ($LASTEXITCODE -ne 0) {
+                throw ("phase1-close failed: make run ACTION=discover-range profile=" + $profileName + " pass=" + $pass)
+            }
+        }
+
         $e2eArgs = @(
             "run",
             "ACTION=e2e",
             "CONFIG_PROFILE=$profileName",
             "PROFILE=$Profile",
-            "START=$Start",
-            "END=$End",
             "SYMBOLS=$Symbols",
             "TIMEFRAMES=$Timeframes",
             "STAGES=$Stages"
         )
+        if (-not [string]::IsNullOrWhiteSpace($Start)) {
+            $e2eArgs += "START=$Start"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($End)) {
+            $e2eArgs += "END=$End"
+        }
         & $MakeCommand @e2eArgs
         if ($LASTEXITCODE -ne 0) {
             throw ("phase1-close failed: make run ACTION=e2e profile=" + $profileName + " pass=" + $pass)
@@ -86,12 +110,16 @@ foreach ($pass in $passes) {
             "ACTION=verify-readiness",
             "CONFIG_PROFILE=$profileName",
             "PROFILE=$Profile",
-            "START=$Start",
-            "END=$End",
             "SYMBOLS=$Symbols",
             "TIMEFRAMES=$Timeframes",
             "READINESS_ACCEPTANCE_OUTPUT=$manifestPath"
         )
+        if (-not [string]::IsNullOrWhiteSpace($Start)) {
+            $verifyArgs += "START=$Start"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($End)) {
+            $verifyArgs += "END=$End"
+        }
         if (-not [string]::IsNullOrWhiteSpace($VerifyReadinessArgs)) {
             $verifyArgs += "VERIFY_READINESS_ARGS=$VerifyReadinessArgs"
         }
@@ -139,6 +167,8 @@ foreach ($pass in $passes) {
             closed_positions            = [int]$payload.summary_snapshot.closed_positions
             total_signals               = [int]$payload.summary_snapshot.total_signals
             total_strikes               = [int]$payload.summary_snapshot.total_strikes
+            resolved_start              = [string]$payload.start
+            resolved_end                = [string]$payload.end
             event_hashes                = $eventHashes
         }
     }
@@ -208,13 +238,20 @@ foreach ($profileName in $profiles) {
 }
 
 $status = if ($failures.Count -eq 0) { "ok" } else { "failed" }
+$resolvedStarts = @($results | ForEach-Object { [string]$_.resolved_start } | Sort-Object -Unique)
+$resolvedEnds = @($results | ForEach-Object { [string]$_.resolved_end } | Sort-Object -Unique)
 $summary = [ordered]@{
     status                = $status
     checked_at            = (Get-Date).ToUniversalTime().ToString("o")
     command               = "make run ACTION=phase1-close"
     profile               = $Profile
-    start                 = $Start
-    end                   = $End
+    range_mode            = $(if ($Profile -eq "max_common") { "auto_discovered_max_common" } elseif ($Profile -eq "custom") { "explicit_custom" } else { "profile_default" })
+    requested_start       = $(if ([string]::IsNullOrWhiteSpace($Start)) { $null } else { $Start })
+    requested_end         = $(if ([string]::IsNullOrWhiteSpace($End)) { $null } else { $End })
+    start                 = $(if ($resolvedStarts.Count -eq 1) { [string]$resolvedStarts[0] } else { $resolvedStarts })
+    end                   = $(if ($resolvedEnds.Count -eq 1) { [string]$resolvedEnds[0] } else { $resolvedEnds })
+    resolved_starts       = $resolvedStarts
+    resolved_ends         = $resolvedEnds
     symbols               = $Symbols
     timeframes            = $Timeframes
     stages                = $Stages
